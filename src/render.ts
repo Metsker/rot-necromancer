@@ -2,6 +2,7 @@ import type Display from "rot-js/lib/display/display.js";
 import { CREATURES, STAT_LABEL, type GameState, type Point } from "./sim/data.ts";
 import {
   chestAt,
+  targetOf,
   commandCap,
   corpseAt,
   explored,
@@ -17,6 +18,7 @@ const FLOOR_CH = ".";
 const CORPSE = "%";
 const STAIR = ">";
 const CHEST = "⩀";
+const GOAL = "⬚";
 
 const INK = PALETTE[23];
 const DARK = PALETTE[2];
@@ -30,6 +32,8 @@ const DIM = PALETTE[9];
 const BTN = PALETTE[6];
 const BTN_ALT = PALETTE[10];
 const GOLD = PALETTE[16];
+const MARK = PALETTE[14];
+const GOAL_COL = PALETTE[22];
 
 // log, status, then a two-row button strip so a thumb has ~48px to land on
 export const HUD_ROWS = 4;
@@ -107,19 +111,20 @@ export function zoneAt(
   return { kind: "map", x: sx + cam.x, y: sy + cam.y };
 }
 
-export function render(
-  d: Display,
-  g: GameState,
-  cols: number,
-  rows: number,
-  flash: Map<string, string>,
-  panel: Panel = "none",
-) {
+export type View = {
+  flash: Map<string, string>;
+  panel: Panel;
+  goal: Point | null;
+};
+
+export function render(d: Display, g: GameState, cols: number, rows: number, view: View) {
+  const { flash, panel, goal } = view;
+  const mark = targetOf(g);
   const cam = cameraFor(g, cols, rows);
-  const view = viewRows(rows);
+  const height = viewRows(rows);
   d.clear();
 
-  for (let sy = 0; sy < view; sy++) {
+  for (let sy = 0; sy < height; sy++) {
     for (let sx = 0; sx < cols; sx++) {
       const x = sx + cam.x;
       const y = sy + cam.y;
@@ -156,8 +161,15 @@ export function render(
         }
       }
 
+      // Where you told them to go, and what you told them to kill
+      if (goal && goal.x === x && goal.y === y && !unitAt(g, x, y)) {
+        ch = GOAL;
+        fg = GOAL_COL;
+      }
+
       const hit = flash.get(`${x},${y}`);
       if (hit) d.draw(sx, sy, ch, DARK, hit);
+      else if (lit && mark && mark.x === x && mark.y === y) d.draw(sx, sy, ch, INK, MARK);
       else d.draw(sx, sy, ch, fg, DARK);
     }
   }

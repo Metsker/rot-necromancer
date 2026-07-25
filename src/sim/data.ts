@@ -31,6 +31,7 @@ export type GameState = {
   units: Unit[];
   corpses: Corpse[];
   chests: Point[];
+  target: number | null;
   stairs: Point;
   nextId: number;
   xp: number;

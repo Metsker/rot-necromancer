@@ -196,6 +196,7 @@ export function newGame(seed: number): GameState {
     units: [],
     corpses: [],
     chests: [],
+    target: null,
     stairs: far,
     nextId: 1,
     xp: 0,
@@ -372,6 +373,21 @@ function step(g: GameState, u: Unit, toward: Point) {
   return true;
 }
 
+// The mark the player set, if it is still alive, hostile and in sight
+function marked(g: GameState, u: Unit): Unit | undefined {
+  if (u.faction !== "player" || g.target === null) return undefined;
+  const t = g.units.find((o) => o.id === g.target);
+  if (!t || t.faction === u.faction || !visible(g, t.x, t.y)) return undefined;
+  return t;
+}
+
+export function setTarget(g: GameState, id: number | null) {
+  g.target = id;
+}
+
+export const targetOf = (g: GameState) =>
+  g.target === null ? undefined : g.units.find((u) => u.id === g.target);
+
 // Awareness needs line of sight as well as range, or every foe on the floor converges at once
 function nearestEnemy(g: GameState, u: Unit, range: number) {
   return g.units
@@ -387,7 +403,7 @@ function actUnit(g: GameState, u: Unit) {
   hooksOf(u).onTurn?.(u, g);
   if (u.withered > 0) u.withered -= 1;
 
-  const foe = nearestEnemy(g, u, TUNING.fovRadius);
+  const foe = marked(g, u) ?? nearestEnemy(g, u, TUNING.fovRadius);
   if (foe && cheb(foe, u) === 1) {
     attack(g, u, foe);
     return;
@@ -482,6 +498,7 @@ function endTurn(g: GameState) {
     if (!g.units.some((o) => o.id === u.id)) continue;
     actUnit(g, u);
   }
+  if (g.target !== null && !g.units.some((u) => u.id === g.target)) g.target = null;
   g.turn += 1;
   decay(g);
   spawnPressure(g);
@@ -597,14 +614,14 @@ const KEY = "necromancer.save";
 
 // Bump whenever GameState changes shape. A save from an older shape is thrown away
 // rather than half-read: a missing field crashes the render loop on the first frame.
-const SAVE_VERSION = 2;
+const SAVE_VERSION = 3;
 
 // Checked as well as the version, because the likely mistake is adding a field
 // and forgetting to bump: a missing one crashes the renderer on the first frame
 const REQUIRED: (keyof GameState)[] = [
   "seed", "rngState", "turn", "w", "h", "tiles", "explored", "vis", "units",
   "corpses", "chests", "stairs", "nextId", "xp", "level", "build", "unspent",
-  "spawned", "log", "over",
+  "spawned", "log", "over", "target",
 ];
 
 export function save(g: GameState) {

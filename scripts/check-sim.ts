@@ -16,6 +16,7 @@ import {
   playerWait,
   routeTo,
   save,
+  setTarget,
   spawn,
 } from "../src/sim/game.ts";
 import { BTN_ROWS, HUD_ROWS, cameraFor, panelRect, render, zoneAt } from "../src/render.ts";
@@ -41,6 +42,7 @@ function sandbox(): GameState {
     units: [],
     corpses: [],
     chests: [],
+    target: null,
     stairs: { x: 10, y: 10 },
     nextId: 1,
     xp: 0,
@@ -372,12 +374,12 @@ test("a flashed tile is drawn inverted so a blow is visible", () => {
       drawn.push({ x, y, ch, fg, bg }),
   };
 
-  render(stub as never, g, 12, 12, new Map());
+  render(stub as never, g, 12, 12, { flash: new Map(), panel: "none", goal: null });
   const plain = drawn.filter((d) => d.ch === CREATURES.rat.glyph).pop();
   assert.ok(plain, "enemy was not drawn at all");
 
   drawn.length = 0;
-  render(stub as never, g, 12, 12, new Map([["6,5", "#ffe077"]]));
+  render(stub as never, g, 12, 12, { flash: new Map([["6,5", "#ffe077"]]), panel: "none", goal: null });
   const lit = drawn.filter((d) => d.ch === CREATURES.rat.glyph).pop();
   assert.ok(lit, "enemy vanished when flashed");
   assert.equal(lit.bg, "#ffe077", "flashed tile kept its normal background");
@@ -418,6 +420,92 @@ test("taps land on what was drawn", () => {
   assert.deepEqual(third, { kind: "line", index: 2 }, "third choice mis-hit");
   assert.equal(zoneAt(g, "level", cols, rows, r.x + 1, r.y).kind, "none", "title row is not a choice");
   assert.equal(zoneAt(g, "level", cols, rows, 0, 0).kind, "none", "tap outside the panel hit a line");
+});
+
+test("an attack order moves the army, not the necromancer", () => {
+  const g = sandbox();
+  const h = spawn(g, "hero", "player", 2, 5);
+  const skeleton = spawn(g, "rat", "player", 3, 5);
+  const foe = spawn(g, "knight", "enemy", 9, 5);
+
+  const heroWas = { x: h.x, y: h.y };
+  const gap = Math.abs(skeleton.x - foe.x);
+
+  setTarget(g, foe.id);
+  playerWait(g);
+
+  assert.deepEqual({ x: h.x, y: h.y }, heroWas, "the necromancer moved on an attack order");
+  assert.ok(Math.abs(skeleton.x - foe.x) < gap, "the minion ignored the order");
+});
+
+test("an order outranks a nearer foe, and dies with its target", () => {
+  const g = sandbox();
+  spawn(g, "hero", "player", 1, 5);
+  const skeleton = spawn(g, "rat", "player", 5, 5);
+  const near = spawn(g, "rat", "enemy", 5, 3);
+  const far = spawn(g, "knight", "enemy", 10, 5);
+
+  setTarget(g, far.id);
+  playerWait(g);
+  assert.ok(skeleton.x > 5, `minion went for the nearer foe instead of the mark`);
+  assert.ok(near.hp === CREATURES.rat.hp, "the nearer foe was attacked anyway");
+
+  g.units = g.units.filter((u) => u.id !== far.id);
+  playerWait(g);
+  assert.equal(g.target, null, "the mark outlived what it was set on");
+});
+
+test("the marked tile is drawn differently from an unmarked one", () => {
+  const g = sandbox();
+  spawn(g, "hero", "player", 5, 5);
+  const foe = spawn(g, "knight", "enemy", 7, 5);
+
+  const drawn: { ch: string; fg: string; bg: string }[] = [];
+  const stub = {
+    clear() {},
+    drawText() {},
+    draw: (_x: number, _y: number, ch: string, fg: string, bg: string) => drawn.push({ ch, fg, bg }),
+  };
+  const view = { flash: new Map<string, string>(), panel: "none" as const, goal: null };
+
+  render(stub as never, g, 12, 12, view);
+  const plain = drawn.filter((d) => d.ch === CREATURES.knight.glyph).pop();
+
+  drawn.length = 0;
+  setTarget(g, foe.id);
+  render(stub as never, g, 12, 12, view);
+  const marked = drawn.filter((d) => d.ch === CREATURES.knight.glyph).pop();
+
+  assert.ok(plain && marked, "the enemy was not drawn");
+  assert.notEqual(marked.bg, plain.bg, "a marked enemy looks the same as an unmarked one");
+});
+
+test("the travel destination is drawn while an order stands", () => {
+  const g = sandbox();
+  spawn(g, "hero", "player", 5, 5);
+
+  const drawn: { x: number; y: number; ch: string }[] = [];
+  const stub = {
+    clear() {},
+    drawText() {},
+    draw: (x: number, y: number, ch: string) => drawn.push({ x, y, ch }),
+  };
+
+  render(stub as never, g, 12, 12, { flash: new Map(), panel: "none", goal: null });
+  const before = drawn.filter((d) => d.ch === "⬚").length;
+
+  drawn.length = 0;
+  render(stub as never, g, 12, 12, { flash: new Map(), panel: "none", goal: { x: 8, y: 3 } });
+  const marks = drawn.filter((d) => d.ch === "⬚");
+
+  const cam = cameraFor(g, 12, 12);
+  assert.equal(before, 0, "a destination was drawn with no order standing");
+  assert.equal(marks.length, 1, "the destination was not drawn exactly once");
+  assert.deepEqual(
+    { x: marks[0].x + cam.x, y: marks[0].y + cam.y },
+    { x: 8, y: 3 },
+    "destination drawn at the wrong world cell",
+  );
 });
 
 test("a scripted run survives 300 turns with its invariants intact", () => {

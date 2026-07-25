@@ -16,6 +16,10 @@
     playerWait,
     routeTo,
     save,
+    setTarget,
+    targetOf,
+    unitAt,
+    visible,
   } from "./sim/game.ts";
   import { type Panel, render, zoneAt } from "./render.ts";
 
@@ -25,6 +29,11 @@
   const HURT_YOU = PALETTE[15];
   const HURT_THEM = PALETTE[17];
   const FATAL = PALETTE[23];
+  const ORDER_MOVE = PALETTE[22];
+  const ORDER_KILL = PALETTE[14];
+  const ORDER_DENIED = PALETTE[6];
+  // ponytail: a plain cap, so an unreachable mark cannot spin the clock forever
+  const ENGAGE_LIMIT = 80;
   const STATS: Stat[] = ["might", "ward", "will"];
 
   let host = $state<HTMLDivElement>();
@@ -37,6 +46,8 @@
   let rows = 1;
   let panel: Panel = "none";
   let walk: Point[] = [];
+  let goal: Point | null = null;
+  let engaging = 0;
   let flashes: { x: number; y: number; color: string; until: number }[] = [];
 
   function after() {
@@ -64,10 +75,18 @@
     after();
   }
 
+  function stop() {
+    walk = [];
+    goal = null;
+    engaging = 0;
+  }
+
   function newRun() {
     clearSave();
     game = newGame(Math.floor(Math.random() * 1e9));
     walk = [];
+    goal = null;
+    engaging = 0;
     flashes = [];
     panel = "none";
   }
@@ -96,7 +115,7 @@
     if (panel !== "none") return;
 
     if (zone.kind === "wait") {
-      walk = [];
+      stop();
       return act(() => playerWait(game));
     }
     if (zone.kind === "army") {
@@ -106,14 +125,65 @@
 
     const h = hero(game);
     if (!h) return;
+
+    const foe = unitAt(game, zone.x, zone.y);
+    if (foe && foe.faction === "enemy" && visible(game, zone.x, zone.y)) {
+      stop();
+      flash(zone.x, zone.y, ORDER_KILL);
+      setTarget(game, foe.id);
+      engaging = ENGAGE_LIMIT;
+      return;
+    }
+
     const dx = zone.x - h.x;
     const dy = zone.y - h.y;
     if (Math.abs(dx) <= 1 && Math.abs(dy) <= 1) {
-      walk = [];
+      stop();
+      flash(zone.x, zone.y, ORDER_MOVE);
       return act(() => playerStep(game, dx, dy));
     }
-    walk = routeTo(game, zone.x, zone.y);
+
+    const route = routeTo(game, zone.x, zone.y);
+    // A refused order still answers, or a dead tap reads as a dead game
+    if (!route.length) return flash(zone.x, zone.y, ORDER_DENIED);
+    stop();
+    setTarget(game, null);
+    walk = route;
+    goal = { x: zone.x, y: zone.y };
+    flash(zone.x, zone.y, ORDER_MOVE);
   }
+
+  function flash(x: number, y: number, color: string) {
+    flashes.push({ x, y, color, until: performance.now() + FLASH_MS * 2 });
+  }
+
+  // Your army fights while you hold position; alone, you close on the mark yourself
+  function stepEngage() {
+    if (engaging <= 0) return;
+    engaging -= 1;
+
+    const mark = targetOf(game);
+    const h = hero(game);
+    if (!mark || !h || game.over || !visible(game, mark.x, mark.y)) {
+      engaging = 0;
+      return;
+    }
+    if (minionCount() > 0) return act(() => playerWait(game));
+
+    const dx = mark.x - h.x;
+    const dy = mark.y - h.y;
+    if (Math.abs(dx) <= 1 && Math.abs(dy) <= 1) return act(() => playerStep(game, dx, dy));
+
+    const route = routeTo(game, mark.x, mark.y);
+    if (!route[0]) {
+      engaging = 0;
+      return;
+    }
+    act(() => playerStep(game, route[0].x - h.x, route[0].y - h.y));
+  }
+
+  const minionCount = () =>
+    game.units.filter((u) => u.faction === "player" && u.creature !== "hero").length;
 
   function stepWalk() {
     const next = walk[0];
@@ -125,8 +195,9 @@
     }
     walk = walk.slice(1);
     act(() => playerStep(game, next.x - h.x, next.y - h.y));
+    if (!walk.length) goal = null;
     // Travel stops the moment something hostile is in view, as tap-to-move promised
-    if (enemiesInView(game) > 0 || panel !== "none") walk = [];
+    if (enemiesInView(game) > 0 || panel !== "none") stop();
   }
 
   const layout = () =>
@@ -206,12 +277,13 @@
           last = now;
           if (since >= STEP_MS) {
             since = 0;
-            stepWalk();
+            if (walk.length) stepWalk();
+            else stepEngage();
           }
           if (flashes.length) flashes = flashes.filter((f) => f.until > now);
-          const flash = new Map<string, string>();
-          for (const f of flashes) flash.set(`${f.x},${f.y}`, f.color);
-          render(display, game, cols, rows, flash, panel);
+          const lit = new Map<string, string>();
+          for (const f of flashes) lit.set(`${f.x},${f.y}`, f.color);
+          render(display, game, cols, rows, { flash: lit, panel, goal });
         };
         let raf = requestAnimationFrame(loop);
 
