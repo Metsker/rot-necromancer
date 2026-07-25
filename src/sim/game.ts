@@ -107,7 +107,7 @@ export const ABILITIES: Record<AbilityId, Hooks> = {
       shard.tier = self.tier;
       shard.hp = half;
       shard.maxHp = self.maxHp;
-      log(g, "The Ossuary splits.");
+      log(g, "Ossuary splits.");
     },
   },
 };
@@ -212,7 +212,7 @@ export function newGame(seed: number): GameState {
   }
 
   computeFov(g);
-  log(g, "You enter the crypt.");
+  log(g, "Into the crypt.");
   return g;
 }
 
@@ -290,11 +290,11 @@ function kill(g: GameState, target: Unit, killer: Unit) {
       g.xp -= TUNING.xpPerLevel * (g.level + 1);
       g.level += 1;
       g.unspent += 1;
-      log(g, `You reach level ${g.level + 1}.`);
+      log(g, `Level ${g.level + 1}.`);
     }
   }
 
-  log(g, `${CREATURES[target.creature].name} falls.`);
+  log(g, `${CREATURES[target.creature].short} falls.`);
   if (target.creature === "hero") g.over = "dead";
 }
 
@@ -328,7 +328,13 @@ function step(g: GameState, u: Unit, toward: Point) {
 
   const blocker = unitAt(g, next.x, next.y);
   if (blocker) {
-    if (blocker.faction !== u.faction) attack(g, u, blocker);
+    if (blocker.faction !== u.faction) {
+      attack(g, u, blocker);
+      return true;
+    }
+    if (blocker.creature === "hero") return false;
+    [u.x, blocker.x] = [blocker.x, u.x];
+    [u.y, blocker.y] = [blocker.y, u.y];
     return true;
   }
   u.x = next.x;
@@ -416,7 +422,7 @@ function decay(g: GameState) {
   for (const c of g.corpses) c.ttl -= 1;
   const rotted = g.corpses.filter((c) => c.ttl <= 0);
   g.corpses = g.corpses.filter((c) => c.ttl > 0);
-  if (rotted.length) log(g, `${rotted.length} corpse${rotted.length > 1 ? "s" : ""} rots away.`);
+  if (rotted.length) log(g, `${rotted.length} corpse${rotted.length > 1 ? "s rot" : " rots"}.`);
 }
 
 function spawnPressure(g: GameState) {
@@ -430,7 +436,7 @@ function spawnPressure(g: GameState) {
     if (!walkable(g, x, y) || cheb(h, { x, y }) <= TUNING.fovRadius + 2) continue;
     spawn(g, pick(SPAWNABLE), "enemy", x, y);
     g.spawned += 1;
-    log(g, "Something stirs in the dark.");
+    log(g, "Something stirs.");
     return;
   }
 }
@@ -459,14 +465,14 @@ function tryRaise(g: GameState, x: number, y: number) {
   const corpse = corpseAt(g, x, y);
   if (!corpse) return;
   if (minions(g).length >= commandCap(g)) {
-    log(g, "No command to spare.");
+    log(g, "No free command.");
     return;
   }
   g.corpses = g.corpses.filter((c) => c !== corpse);
   const spot = freeNear(g, x, y);
   if (!spot) return;
   spawn(g, corpse.creature, "player", spot.x, spot.y);
-  log(g, `Raised ${CREATURES[corpse.creature].name}.`);
+  log(g, `Raised ${CREATURES[corpse.creature].short}.`);
 }
 
 export function playerStep(g: GameState, dx: number, dy: number) {
@@ -483,7 +489,11 @@ export function playerStep(g: GameState, dx: number, dy: number) {
     endTurn(g);
     return;
   }
-  if (blocker) return;
+  // Your own dead never bar your way; you trade places with them
+  if (blocker) {
+    blocker.x = h.x;
+    blocker.y = h.y;
+  }
 
   h.x = x;
   h.y = y;
@@ -491,7 +501,7 @@ export function playerStep(g: GameState, dx: number, dy: number) {
 
   if (x === g.stairs.x && y === g.stairs.y) {
     const bossAlive = g.units.some((u) => u.creature === "ossuary");
-    if (bossAlive) log(g, "The Ossuary bars the stair.");
+    if (bossAlive) log(g, "Stair is barred.");
     else g.over = "descended";
   }
   endTurn(g);
@@ -507,10 +517,11 @@ export function routeTo(g: GameState, tx: number, ty: number): Point[] {
   const h = hero(g);
   if (!h || !isFloor(g, tx, ty) || !explored(g, tx, ty)) return [];
   const path: Point[] = [];
-  const passable = (x: number, y: number) =>
-    isFloor(g, x, y) &&
-    explored(g, x, y) &&
-    (!unitAt(g, x, y) || (x === tx && y === ty) || (x === h.x && y === h.y));
+  const passable = (x: number, y: number) => {
+    if (!isFloor(g, x, y) || !explored(g, x, y)) return false;
+    const o = unitAt(g, x, y);
+    return !o || o.faction === "player" || (x === tx && y === ty);
+  };
   const astar = new AStar(tx, ty, passable, {
     topology: 8,
   });

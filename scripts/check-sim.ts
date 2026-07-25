@@ -18,7 +18,7 @@ import {
   save,
   spawn,
 } from "../src/sim/game.ts";
-import { render } from "../src/render.ts";
+import { BTN_ROWS, HUD_ROWS, cameraFor, panelRect, render, zoneAt } from "../src/render.ts";
 
 const tests: [string, () => void][] = [];
 const test = (name: string, fn: () => void) => tests.push([name, fn]);
@@ -277,6 +277,42 @@ test("a flashed tile is drawn inverted so a blow is visible", () => {
   assert.ok(lit, "enemy vanished when flashed");
   assert.equal(lit.bg, "#ffe077", "flashed tile kept its normal background");
   assert.notEqual(lit.bg, plain.bg, "flash made no visible difference");
+});
+
+test("taps land on what was drawn", () => {
+  const g = sandbox();
+  spawn(g, "hero", "player", 5, 5);
+  const cols = 16;
+  const rows = 20;
+
+  const left = zoneAt(g, "none", cols, rows, 2, rows - 1);
+  const right = zoneAt(g, "none", cols, rows, cols - 2, rows - BTN_ROWS);
+  assert.equal(left.kind, "wait", "left of the strip is not WAIT");
+  assert.equal(right.kind, "army", "right of the strip is not ARMY");
+
+  // both button rows must answer, or the 48px target is a lie
+  assert.equal(zoneAt(g, "none", cols, rows, 2, rows - BTN_ROWS).kind, "wait");
+
+  const cam = cameraFor(g, cols, rows);
+  const onMap = zoneAt(g, "none", cols, rows, 3, 4);
+  assert.equal(onMap.kind, "map");
+  assert.deepEqual(
+    { x: onMap.kind === "map" ? onMap.x : -1, y: onMap.kind === "map" ? onMap.y : -1 },
+    { x: 3 + cam.x, y: 4 + cam.y },
+    "map tap resolved to the wrong world tile",
+  );
+
+  // the status and log rows are dead space, not the map
+  assert.equal(zoneAt(g, "none", cols, rows, 3, rows - HUD_ROWS).kind, "none");
+
+  g.unspent = 1;
+  const r = panelRect(g, "level", cols, rows);
+  const first = zoneAt(g, "level", cols, rows, r.x + 1, r.y + 2);
+  const third = zoneAt(g, "level", cols, rows, r.x + 1, r.y + 4);
+  assert.deepEqual(first, { kind: "line", index: 0 }, "first choice mis-hit");
+  assert.deepEqual(third, { kind: "line", index: 2 }, "third choice mis-hit");
+  assert.equal(zoneAt(g, "level", cols, rows, r.x + 1, r.y).kind, "none", "title row is not a choice");
+  assert.equal(zoneAt(g, "level", cols, rows, 0, 0).kind, "none", "tap outside the panel hit a line");
 });
 
 test("a scripted run survives 300 turns with its invariants intact", () => {

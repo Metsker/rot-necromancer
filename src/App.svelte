@@ -3,99 +3,121 @@
   import { TILE, TILE_MAP, PALETTE } from "./tilemap";
   import { loadTileset } from "./tileset";
   import { computeLayout } from "./layout";
-  import { CREATURES, STAT_LABEL, type GameState, type Point, type Stat } from "./sim/data.ts";
+  import { type GameState, type Point, type Stat } from "./sim/data.ts";
   import {
     chooseStat,
     clearSave,
     drainHits,
-    commandCap,
     enemiesInView,
     hero,
     load,
-    minions,
     newGame,
     playerStep,
     playerWait,
     routeTo,
     save,
   } from "./sim/game.ts";
-  import { HUD_ROWS, cameraFor, render } from "./render.ts";
+  import { type Panel, render, zoneAt } from "./render.ts";
 
-  const DEBUG_PX = 88;
   const STEP_MS = 70;
   const FLASH_MS = 170;
   const BG = PALETTE[2];
   const HURT_YOU = PALETTE[15];
   const HURT_THEM = PALETTE[17];
   const FATAL = PALETTE[23];
+  const STATS: Stat[] = ["might", "ward", "will"];
 
   let host = $state<HTMLDivElement>();
-  let strip = $state<HTMLDivElement>();
-  let cols = $state(1);
-  let rows = $state(1);
-  let unspent = $state(0);
-  let over = $state("");
-  let capLine = $state("");
-  let logLine = $state("");
-  let levelNo = $state(1);
-  let roster = $state<{ name: string; hp: string }[]>([]);
-  let rosterOpen = $state(false);
-  let ready = $state(false);
+  let safe = $state<HTMLDivElement>();
 
-  // The game object is deliberately outside Svelte's reactivity: it holds 3600-entry
-  // arrays mutated every turn, and deep proxying that would cost more than it buys
+  // Everything below is plain state: the whole interface is drawn into the grid,
+  // so nothing here needs Svelte reactivity
   let game: GameState = load() ?? newGame(Math.floor(Math.random() * 1e9));
+  let cols = 1;
+  let rows = 1;
+  let panel: Panel = "none";
   let walk: Point[] = [];
   let flashes: { x: number; y: number; color: string; until: number }[] = [];
 
-  function sync() {
-    unspent = game.unspent;
-    over = game.over;
-    capLine = `${minions(game).length}/${commandCap(game)}`;
-    logLine = game.log[game.log.length - 1] ?? "";
-    levelNo = game.level + 1;
-    roster = minions(game).map((u) => ({
-      name: CREATURES[u.creature].name,
-      hp: `${u.hp}/${u.maxHp}`,
-    }));
-    if (game.over) clearSave();
-    else save(game);
+  function after() {
+    const until = performance.now() + FLASH_MS;
+    for (const h of drainHits()) {
+      flashes.push({
+        x: h.x,
+        y: h.y,
+        color: h.fatal ? FATAL : h.faction === "player" ? HURT_YOU : HURT_THEM,
+        until,
+      });
+    }
+    if (game.over) {
+      panel = "over";
+      clearSave();
+    } else {
+      if (game.unspent > 0) panel = "level";
+      save(game);
+    }
   }
 
   function act(fn: () => void) {
-    if (game.over) return;
+    if (game.over || panel === "level") return;
     fn();
-    const until = performance.now() + FLASH_MS;
-    for (const h of drainHits()) {
-      const color = h.fatal ? FATAL : h.faction === "player" ? HURT_YOU : HURT_THEM;
-      flashes.push({ x: h.x, y: h.y, color, until });
-    }
-    sync();
+    after();
   }
 
-  function tapAt(sx: number, sy: number) {
-    if (game.over || unspent > 0) return;
-    if (sy >= rows - HUD_ROWS) return;
+  function newRun() {
+    clearSave();
+    game = newGame(Math.floor(Math.random() * 1e9));
+    walk = [];
+    flashes = [];
+    panel = "none";
+  }
+
+  function onLine(index: number) {
+    if (panel === "level") {
+      chooseStat(game, STATS[index]);
+      panel = game.unspent > 0 ? "level" : "none";
+      save(game);
+      return;
+    }
+    if (panel === "over") {
+      if (index === 1) newRun();
+      return;
+    }
+    panel = "none";
+  }
+
+  function onTap(sx: number, sy: number) {
+    const zone = zoneAt(game, panel, cols, rows, sx, sy);
+    if (zone.kind === "line") return onLine(zone.index);
+    if (zone.kind === "none") {
+      if (panel === "army") panel = "none";
+      return;
+    }
+    if (panel !== "none") return;
+
+    if (zone.kind === "wait") {
+      walk = [];
+      return act(() => playerWait(game));
+    }
+    if (zone.kind === "army") {
+      panel = "army";
+      return;
+    }
 
     const h = hero(game);
     if (!h) return;
-    const cam = cameraFor(game, cols, rows);
-    const wx = sx + cam.x;
-    const wy = sy + cam.y;
-
-    const dx = wx - h.x;
-    const dy = wy - h.y;
+    const dx = zone.x - h.x;
+    const dy = zone.y - h.y;
     if (Math.abs(dx) <= 1 && Math.abs(dy) <= 1) {
       walk = [];
-      act(() => playerStep(game, dx, dy));
-      return;
+      return act(() => playerStep(game, dx, dy));
     }
-    walk = routeTo(game, wx, wy);
+    walk = routeTo(game, zone.x, zone.y);
   }
 
   function stepWalk() {
     const next = walk[0];
-    if (!next) return;
+    if (!next || panel !== "none") return;
     const h = hero(game);
     if (!h) {
       walk = [];
@@ -104,15 +126,7 @@
     walk = walk.slice(1);
     act(() => playerStep(game, next.x - h.x, next.y - h.y));
     // Travel stops the moment something hostile is in view, as tap-to-move promised
-    if (enemiesInView(game) > 0 || game.unspent > 0) walk = [];
-  }
-
-  function restart() {
-    clearSave();
-    game = newGame(Math.floor(Math.random() * 1e9));
-    walk = [];
-    rosterOpen = false;
-    sync();
+    if (enemiesInView(game) > 0 || panel !== "none") walk = [];
   }
 
   const layout = () =>
@@ -120,7 +134,7 @@
       innerWidth: window.innerWidth,
       innerHeight: window.innerHeight,
       dpr: window.devicePixelRatio || 1,
-      reserved: strip?.offsetHeight || DEBUG_PX,
+      reserved: safe?.offsetHeight ?? 0,
     });
 
   $effect(() => {
@@ -157,11 +171,11 @@
         document.body.style.background = BG;
         host.appendChild(canvas);
 
-        const onTap = (e: PointerEvent) => {
+        const tap = (e: PointerEvent) => {
           const [x, y] = display.eventToPosition(e);
-          if (x >= 0 && y >= 0) tapAt(x, y);
+          if (x >= 0 && y >= 0) onTap(x, y);
         };
-        canvas.addEventListener("pointerdown", onTap);
+        canvas.addEventListener("pointerdown", tap);
 
         const resize = () => {
           const l = layout();
@@ -176,8 +190,8 @@
         window.addEventListener("resize", resize);
         window.addEventListener("orientationchange", resize);
         resize();
-        sync();
-        ready = true;
+        if (game.over) panel = "over";
+        else if (game.unspent > 0) panel = "level";
 
         let last = performance.now();
         let since = 0;
@@ -191,7 +205,7 @@
           if (flashes.length) flashes = flashes.filter((f) => f.until > now);
           const flash = new Map<string, string>();
           for (const f of flashes) flash.set(`${f.x},${f.y}`, f.color);
-          render(display, game, cols, rows, flash);
+          render(display, game, cols, rows, flash, panel);
           raf = requestAnimationFrame(loop);
         };
         let raf = requestAnimationFrame(loop);
@@ -200,7 +214,7 @@
           cancelAnimationFrame(raf);
           window.removeEventListener("resize", resize);
           window.removeEventListener("orientationchange", resize);
-          canvas.removeEventListener("pointerdown", onTap);
+          canvas.removeEventListener("pointerdown", tap);
           canvas.remove();
         };
       },
@@ -214,53 +228,9 @@
   });
 </script>
 
-<main style="--bg:{PALETTE[2]}; --ink:{PALETTE[23]}; --dim:{PALETTE[9]}; --gold:{PALETTE[16]}">
+<main>
   <div class="stage" bind:this={host}></div>
-
-  <div class="bar" bind:this={strip}>
-    <button onclick={() => act(() => playerWait(game))} disabled={!ready || !!over}>wait</button>
-    <button onclick={() => (rosterOpen = !rosterOpen)} disabled={!ready}>army {capLine}</button>
-    <span class="dim log">{logLine}</span>
-  </div>
-
-  {#if rosterOpen}
-    <div class="sheet">
-      <h2>Army {capLine}</h2>
-      {#if roster.length === 0}
-        <p class="dim">Nothing raised. Step onto a corpse to claim it.</p>
-      {:else}
-        <ul>
-          {#each roster as r}
-            <li><span>{r.name}</span><span class="dim">{r.hp}</span></li>
-          {/each}
-        </ul>
-      {/if}
-      <button onclick={() => (rosterOpen = false)}>close</button>
-    </div>
-  {/if}
-
-  {#if unspent > 0}
-    <div class="sheet">
-      <h2>Level {levelNo}</h2>
-      {#each Object.entries(STAT_LABEL) as [stat, label]}
-        <button class="wide" onclick={() => act(() => chooseStat(game, stat as Stat))}>
-          {label}
-        </button>
-      {/each}
-    </div>
-  {/if}
-
-  {#if over}
-    <div class="sheet">
-      <h2>{over === "dead" ? "The necromancer falls" : "You descend"}</h2>
-      <p class="dim">
-        {over === "dead"
-          ? "Your army crumbles with you."
-          : "The stair closes behind you. Floor 2 is not built yet."}
-      </p>
-      <button class="wide" onclick={restart}>new run</button>
-    </div>
-  {/if}
+  <div class="safe" bind:this={safe}></div>
 </main>
 
 <style>
@@ -273,80 +243,13 @@
     display: flex;
     justify-content: center;
     align-items: flex-start;
-    background: var(--bg);
-    color: var(--ink);
-    font: 13px/1.4 ui-monospace, monospace;
   }
-  .bar {
+  /* Measured, not assumed: keeps the button strip clear of the home indicator */
+  .safe {
     position: fixed;
+    bottom: 0;
     left: 0;
     right: 0;
-    bottom: 0;
-    display: flex;
-    gap: 10px;
-    align-items: center;
-    justify-content: center;
-    flex-wrap: wrap;
-    padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
-    background: var(--bg);
-  }
-  .log {
-    flex-basis: 100%;
-    text-align: center;
-    min-height: 1.4em;
-  }
-  button {
-    min-height: 44px;
-    min-width: 96px;
-    border: 1px solid var(--dim);
-    background: transparent;
-    color: var(--ink);
-    font: inherit;
-    border-radius: 4px;
-  }
-  button:disabled {
-    opacity: 0.4;
-  }
-  button.wide {
-    width: 100%;
-    text-align: left;
-    padding: 0 12px;
-  }
-  .sheet {
-    position: fixed;
-    left: 50%;
-    top: 50%;
-    transform: translate(-50%, -50%);
-    width: min(320px, calc(100vw - 32px));
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    padding: 16px;
-    background: var(--bg);
-    border: 1px solid var(--dim);
-    border-radius: 6px;
-  }
-  h2 {
-    margin: 0;
-    font-size: 15px;
-    color: var(--gold);
-  }
-  p {
-    margin: 0;
-  }
-  ul {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-  li {
-    display: flex;
-    justify-content: space-between;
-  }
-  .dim {
-    color: var(--dim);
+    padding-bottom: env(safe-area-inset-bottom);
   }
 </style>
