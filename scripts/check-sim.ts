@@ -6,6 +6,7 @@ import {
   attack,
   commandCap,
   corpseAt,
+  drainHits,
   hero,
   isFloor,
   load,
@@ -17,6 +18,7 @@ import {
   save,
   spawn,
 } from "../src/sim/game.ts";
+import { render } from "../src/render.ts";
 
 const tests: [string, () => void][] = [];
 const test = (name: string, fn: () => void) => tests.push([name, fn]);
@@ -180,6 +182,52 @@ test("a save round-trips through storage with its RNG state", () => {
   assert.equal(RNG.getUniform(), expected, "reloading re-rolled the RNG");
 });
 
+test("minions keep up with a walking hero", () => {
+  const g = sandbox();
+  const h = spawn(g, "hero", "player", 2, 5);
+  spawn(g, "rat", "player", 1, 5);
+  spawn(g, "rat", "player", 1, 6);
+
+  for (let i = 0; i < 7; i++) playerStep(g, 1, 0);
+  assert.equal(h.x, 9, "hero did not walk");
+
+  for (const m of minions(g)) {
+    const gap = Math.max(Math.abs(m.x - h.x), Math.abs(m.y - h.y));
+    assert.ok(gap <= 3, `${m.creature} trailed ${gap} tiles behind`);
+  }
+});
+
+test("a seen enemy closes on the hero", () => {
+  const g = sandbox();
+  const h = spawn(g, "hero", "player", 2, 5);
+  const foe = spawn(g, "rat", "enemy", 9, 5);
+  const before = Math.abs(foe.x - h.x);
+
+  playerWait(g);
+  playerWait(g);
+  assert.ok(Math.abs(foe.x - h.x) < before, "enemy never moved toward the hero");
+});
+
+test("every landed blow reports a hit for the view to flash", () => {
+  const g = sandbox();
+  const h = spawn(g, "hero", "player", 5, 5);
+  const foe = spawn(g, "rat", "enemy", 6, 5);
+  drainHits();
+
+  attack(g, h, foe);
+  const first = drainHits();
+  assert.equal(first.length, 1, "a blow reported no hit");
+  assert.deepEqual({ x: first[0].x, y: first[0].y }, { x: 6, y: 5 }, "hit reported at the wrong tile");
+  assert.equal(first[0].faction, "enemy");
+  assert.equal(first[0].fatal, false);
+
+  foe.hp = 1;
+  attack(g, h, foe);
+  const second = drainHits();
+  assert.equal(second[0].fatal, true, "a killing blow was not marked fatal");
+  assert.equal(drainHits().length, 0, "hits were not drained");
+});
+
 test("travel refuses to route into unexplored ground", () => {
   const g = newGame(2026);
   const h = hero(g)!;
@@ -204,6 +252,31 @@ test("travel refuses to route into unexplored ground", () => {
   const path = routeTo(g, far.x, far.y);
   assert.ok(path.length > 0, "could not route across explored ground");
   for (const p of path) assert.equal(g.explored[p.y * g.w + p.x], 1, "path crossed unseen ground");
+});
+
+test("a flashed tile is drawn inverted so a blow is visible", () => {
+  const g = sandbox();
+  spawn(g, "hero", "player", 5, 5);
+  spawn(g, "rat", "enemy", 6, 5);
+
+  const drawn: { x: number; y: number; ch: string; fg: string; bg: string }[] = [];
+  const stub = {
+    clear() {},
+    drawText() {},
+    draw: (x: number, y: number, ch: string, fg: string, bg: string) =>
+      drawn.push({ x, y, ch, fg, bg }),
+  };
+
+  render(stub as never, g, 12, 12, new Map());
+  const plain = drawn.filter((d) => d.ch === CREATURES.rat.glyph).pop();
+  assert.ok(plain, "enemy was not drawn at all");
+
+  drawn.length = 0;
+  render(stub as never, g, 12, 12, new Map([["6,5", "#ffe077"]]));
+  const lit = drawn.filter((d) => d.ch === CREATURES.rat.glyph).pop();
+  assert.ok(lit, "enemy vanished when flashed");
+  assert.equal(lit.bg, "#ffe077", "flashed tile kept its normal background");
+  assert.notEqual(lit.bg, plain.bg, "flash made no visible difference");
 });
 
 test("a scripted run survives 300 turns with its invariants intact", () => {

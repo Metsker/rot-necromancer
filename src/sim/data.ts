@@ -79,10 +79,10 @@ export type Template = {
 
 export const CREATURES: Record<CreatureId, Template> = {
   hero: { name: "Necromancer", glyph: "🕱", color: 16, hp: 36, dmg: 4, xp: 0, ability: null },
-  rat: { name: "Plague Rat", glyph: "r", color: 15, hp: 6, dmg: 2, xp: 6, ability: "swarm" },
-  knight: { name: "Bone Knight", glyph: "k", color: 22, hp: 12, dmg: 2, xp: 12, ability: "bulwark" },
-  moth: { name: "Grave Moth", glyph: "g", color: 20, hp: 8, dmg: 2, xp: 9, ability: "wither" },
-  wisp: { name: "Corpse Wisp", glyph: "w", color: 21, hp: 7, dmg: 1, xp: 9, ability: "siphon" },
+  rat: { name: "Plague Rat", glyph: "⚇", color: 15, hp: 6, dmg: 2, xp: 6, ability: "swarm" },
+  knight: { name: "Bone Knight", glyph: "⌤", color: 22, hp: 12, dmg: 2, xp: 12, ability: "bulwark" },
+  moth: { name: "Grave Moth", glyph: "⫙", color: 20, hp: 8, dmg: 2, xp: 9, ability: "wither" },
+  wisp: { name: "Corpse Wisp", glyph: "◉", color: 21, hp: 7, dmg: 1, xp: 9, ability: "siphon" },
   ossuary: { name: "Ossuary", glyph: "⚱", color: 17, hp: 42, dmg: 5, xp: 60, ability: "split" },
 };
 

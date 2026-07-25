@@ -7,6 +7,7 @@
   import {
     chooseStat,
     clearSave,
+    drainHits,
     commandCap,
     enemiesInView,
     hero,
@@ -22,7 +23,11 @@
 
   const DEBUG_PX = 88;
   const STEP_MS = 70;
+  const FLASH_MS = 170;
   const BG = PALETTE[2];
+  const HURT_YOU = PALETTE[15];
+  const HURT_THEM = PALETTE[17];
+  const FATAL = PALETTE[23];
 
   let host = $state<HTMLDivElement>();
   let strip = $state<HTMLDivElement>();
@@ -41,6 +46,7 @@
   // arrays mutated every turn, and deep proxying that would cost more than it buys
   let game: GameState = load() ?? newGame(Math.floor(Math.random() * 1e9));
   let walk: Point[] = [];
+  let flashes: { x: number; y: number; color: string; until: number }[] = [];
 
   function sync() {
     unspent = game.unspent;
@@ -59,6 +65,11 @@
   function act(fn: () => void) {
     if (game.over) return;
     fn();
+    const until = performance.now() + FLASH_MS;
+    for (const h of drainHits()) {
+      const color = h.fatal ? FATAL : h.faction === "player" ? HURT_YOU : HURT_THEM;
+      flashes.push({ x: h.x, y: h.y, color, until });
+    }
     sync();
   }
 
@@ -177,7 +188,10 @@
             since = 0;
             stepWalk();
           }
-          render(display, game, cols, rows);
+          if (flashes.length) flashes = flashes.filter((f) => f.until > now);
+          const flash = new Map<string, string>();
+          for (const f of flashes) flash.set(`${f.x},${f.y}`, f.color);
+          render(display, game, cols, rows, flash);
           raf = requestAnimationFrame(loop);
         };
         let raf = requestAnimationFrame(loop);

@@ -1,7 +1,7 @@
 import type Display from "rot-js/lib/display/display.js";
 import { CREATURES, type GameState, type Point } from "./sim/data.ts";
 import { commandCap, corpseAt, explored, hero, minions, unitAt, visible } from "./sim/game.ts";
-import { PALETTE } from "./tilemap";
+import { PALETTE } from "./tilemap.ts";
 
 const WALL = "▓";
 const FLOOR_CH = ".";
@@ -35,7 +35,13 @@ export function screenToWorld(cam: Point, sx: number, sy: number): Point {
   return { x: sx + cam.x, y: sy + cam.y };
 }
 
-export function render(d: Display, g: GameState, cols: number, rows: number) {
+export function render(
+  d: Display,
+  g: GameState,
+  cols: number,
+  rows: number,
+  flash: Map<string, string>,
+) {
   const cam = cameraFor(g, cols, rows);
   const view = rows - HUD_ROWS;
   d.clear();
@@ -71,7 +77,9 @@ export function render(d: Display, g: GameState, cols: number, rows: number) {
         }
       }
 
-      d.draw(sx, sy, ch, fg, DARK);
+      const hit = flash.get(`${x},${y}`);
+      if (hit) d.draw(sx, sy, ch, DARK, hit);
+      else d.draw(sx, sy, ch, fg, DARK);
     }
   }
 

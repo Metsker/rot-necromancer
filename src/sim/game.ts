@@ -8,6 +8,7 @@ import {
   TUNING,
   type AbilityId,
   type CreatureId,
+  type Faction,
   type GameState,
   type Point,
   type Stat,
@@ -42,6 +43,15 @@ export const commandCap = (g: GameState) =>
 
 const cheb = (a: Point, b: Point) => Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
 const walkable = (g: GameState, x: number, y: number) => isFloor(g, x, y) && !unitAt(g, x, y);
+
+// Hit feedback is a view concern, so it lives outside the state and never reaches the save
+export type Hit = { x: number; y: number; faction: Faction; fatal: boolean };
+let hits: Hit[] = [];
+export const drainHits = (): Hit[] => {
+  const out = hits;
+  hits = [];
+  return out;
+};
 
 function log(g: GameState, line: string) {
   g.log.push(line);
@@ -252,6 +262,7 @@ export function attack(g: GameState, attacker: Unit, target: Unit) {
 
   hooksOf(attacker).onAttack?.(attacker, target, g);
   target.hp -= dmg;
+  hits.push({ x: target.x, y: target.y, faction: target.faction, fatal: target.hp <= 0 });
 
   if (target.hp > 0) {
     hooksOf(target).onDamaged?.(target, dmg, g);
@@ -302,7 +313,13 @@ export function chooseStat(g: GameState, stat: Stat) {
 
 function step(g: GameState, u: Unit, toward: Point) {
   const path: Point[] = [];
-  const astar = new AStar(toward.x, toward.y, (x, y) => isFloor(g, x, y) && (!unitAt(g, x, y) || (x === toward.x && y === toward.y)), {
+  // The mover's own tile has to count as passable, or A* rejects its own start node
+  const passable = (x: number, y: number) => {
+    if (!isFloor(g, x, y)) return false;
+    const o = unitAt(g, x, y);
+    return !o || o.id === u.id || (x === toward.x && y === toward.y);
+  };
+  const astar = new AStar(toward.x, toward.y, passable, {
     topology: 8,
   });
   astar.compute(u.x, u.y, (x, y) => path.push({ x, y }));
@@ -345,8 +362,54 @@ function actUnit(g: GameState, u: Unit) {
   }
   if (u.faction === "player") {
     const h = hero(g);
-    if (h && cheb(h, u) > 2) step(g, u, h);
+    if (h && cheb(h, u) > 1) follow(g, u, h);
   }
+}
+
+// Degrade rather than give up: a blocked corridor must not freeze a minion for good
+function follow(g: GameState, u: Unit, h: Unit) {
+  const spot = escortSpot(g, h, u);
+  if (spot && step(g, u, spot)) return;
+  if (step(g, u, h)) return;
+
+  let best: Point | undefined;
+  let bestD = cheb(u, h);
+  for (const [dx, dy] of DIRS) {
+    const x = u.x + dx;
+    const y = u.y + dy;
+    if (!walkable(g, x, y)) continue;
+    const d = cheb({ x, y }, h);
+    if (d < bestD) {
+      bestD = d;
+      best = { x, y };
+    }
+  }
+  if (best) {
+    u.x = best.x;
+    u.y = best.y;
+  }
+}
+
+// The nearest free tile beside the hero, chosen per minion so a retinue fans out
+function escortSpot(g: GameState, h: Unit, u: Unit): Point | undefined {
+  let best: Point | undefined;
+  let bestD = Infinity;
+  for (let dy = -2; dy <= 2; dy++) {
+    for (let dx = -2; dx <= 2; dx++) {
+      if (!dx && !dy) continue;
+      const x = h.x + dx;
+      const y = h.y + dy;
+      if (!isFloor(g, x, y)) continue;
+      const o = unitAt(g, x, y);
+      if (o && o.id !== u.id) continue;
+      const d = cheb(u, { x, y }) * 4 + Math.max(Math.abs(dx), Math.abs(dy));
+      if (d < bestD) {
+        bestD = d;
+        best = { x, y };
+      }
+    }
+  }
+  return best;
 }
 
 function decay(g: GameState) {
@@ -373,8 +436,13 @@ function spawnPressure(g: GameState) {
 }
 
 function endTurn(g: GameState) {
-  for (const u of [...g.units]) {
-    if (u.creature === "hero") continue;
+  const h = hero(g);
+  // Front-to-back, so a column advances into ground the unit ahead has just vacated
+  const order = g.units
+    .filter((u) => u.creature !== "hero")
+    .sort((a, b) => (h ? cheb(a, h) - cheb(b, h) : 0));
+
+  for (const u of order) {
     if (!g.units.some((o) => o.id === u.id)) continue;
     actUnit(g, u);
   }
