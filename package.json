@@ -1,0 +1,25 @@
+{
+  "name": "necromancer",
+  "version": "1.0.0",
+  "description": "",
+  "scripts": {
+    "gen": "node scripts/gen-tilemap.mjs",
+    "dev": "npm run gen && vite",
+    "build": "npm run gen && vite build",
+    "preview": "vite preview --host"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "rot-js": "^2.2.1"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^7.2.0",
+    "svelte": "^5.56.8",
+    "typescript": "^7.0.2",
+    "vite": "^8.1.5"
+  },
+  "private": true
+}
