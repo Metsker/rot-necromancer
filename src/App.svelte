@@ -2,13 +2,10 @@
   import { Display } from "rot-js";
   import { TILE, TILE_MAP, SHEET, PALETTE } from "./tilemap";
   import { loadTileset } from "./tileset";
+  import { computeLayout } from "./layout";
 
-  const TARGET_TILE_CSS = 16;
-  const MIN_COLS = 16;
-  const MIN_ROWS = 20;
-  const MAX_COLS = 48;
-  const MAX_ROWS = 64;
   const DEBUG_PX = 88;
+  const WIDE_COLS = 34;
 
   const BG = PALETTE[2];
   const WALL = PALETTE[10];
@@ -30,58 +27,58 @@
   ];
 
   let host = $state<HTMLDivElement>();
+  let strip = $state<HTMLDivElement>();
   let status = $state("booting");
   let tapped = $state("-");
   let fps = $state(0);
   let stress = $state(false);
   let scale = $state(1);
   let dpr = $state(1);
-  let cols = $state(MIN_COLS);
-  let rows = $state(MIN_ROWS);
+  let cols = $state(1);
+  let rows = $state(1);
 
   const webgl2 = !!document.createElement("canvas").getContext("webgl2");
   const glyphs = Object.keys(TILE_MAP);
-  const clamp = (n: number, lo: number, hi: number) => Math.min(Math.max(n, lo), hi);
 
-  // Scale is picked for legibility in device pixels, then the grid fills what is left
-  function layout() {
-    const d = window.devicePixelRatio || 1;
-    const s = Math.max(1, Math.round((TARGET_TILE_CSS * d) / TILE));
-    const cell = TILE * s;
-    return {
-      dpr: d,
-      scale: s,
-      cell,
-      cols: clamp(Math.floor((window.innerWidth * d) / cell), MIN_COLS, MAX_COLS),
-      rows: clamp(Math.floor(((window.innerHeight - DEBUG_PX) * d) / cell), MIN_ROWS, MAX_ROWS),
-    };
-  }
+  const layout = () =>
+    computeLayout({
+      innerWidth: window.innerWidth,
+      innerHeight: window.innerHeight,
+      dpr: window.devicePixelRatio || 1,
+      reserved: strip?.offsetHeight || DEBUG_PX,
+    });
 
   function drawScene(d: Display, w: number, h: number) {
     d.clear();
 
     SHEET.forEach((row, y) =>
       row.forEach((ch, x) => {
-        if (x < w && y < h) d.draw(x, y, ch, PALETTE[6 + ((x + y) % 18)], BG);
+        if (x < w && y < h - 1) d.draw(x, y, ch, PALETTE[6 + ((x + y) % 18)], BG);
       }),
     );
 
-    let y = Math.min(SHEET.length, h) + 1;
+    // Short viewports put the rest beside the sheet rather than under it
+    const wide = w >= WIDE_COLS;
+    const ox = wide ? 17 : 0;
+    let oy = wide ? 0 : Math.min(SHEET.length, h) + 1;
+    const span = Math.max(1, w - ox);
+
     PALETTE.forEach((c, i) => {
-      const py = y + Math.floor(i / w);
-      if (py < h) d.draw(i % w, py, "█", c, BG);
+      const py = oy + Math.floor(i / span);
+      if (py < h - 1) d.draw(ox + (i % span), py, "█", c, BG);
     });
 
-    y += Math.ceil(PALETTE.length / w) + 1;
+    oy += Math.ceil(PALETTE.length / span) + 1;
     ROOM.forEach((line, ry) =>
       [...line].forEach((ch, rx) => {
-        const cy = y + ry;
-        if (rx >= w || cy >= h - 1) return;
+        const cx = ox + rx;
+        const cy = oy + ry;
+        if (cx >= w || cy >= h - 1) return;
         const fg = ch === "." ? FLOOR : "rkg".includes(ch) ? FOE : ch === "†" ? BONE : WALL;
-        d.draw(rx, cy, ch, fg, BG);
+        d.draw(cx, cy, ch, fg, BG);
       }),
     );
-    if (y + 4 < h - 1) d.draw(3, y + 4, "🕱", HERO, BG);
+    if (ox + 3 < w && oy + 4 < h - 1) d.draw(ox + 3, oy + 4, "🕱", HERO, BG);
 
     d.drawText(0, h - 1, `%c{${FOE}}♥%c{${BONE}}12 %c{${PALETTE[20]}}⚉%c{${BONE}}8 †4/6`);
   }
@@ -156,7 +153,9 @@
           apply(l);
         };
         window.addEventListener("resize", resize);
+        window.addEventListener("orientationchange", resize);
         apply(first);
+        requestAnimationFrame(resize);
 
         let frames = 0;
         let last = performance.now();
@@ -176,6 +175,7 @@
         cleanup = () => {
           cancelAnimationFrame(raf);
           window.removeEventListener("resize", resize);
+          window.removeEventListener("orientationchange", resize);
           canvas.removeEventListener("pointerdown", onTap);
           canvas.remove();
         };
@@ -196,7 +196,7 @@
 
 <main style="--bg:{PALETTE[2]}; --ink:{PALETTE[23]}; --dim:{PALETTE[9]}">
   <div class="stage" bind:this={host}></div>
-  <div class="debug">
+  <div class="debug" bind:this={strip}>
     <button onclick={toggleStress} class:on={stress}>
       {stress ? "stop" : "stress"}
     </button>
@@ -232,7 +232,7 @@
     flex-wrap: wrap;
     justify-content: center;
     padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
-    background: color-mix(in srgb, var(--bg) 80%, transparent);
+    background: var(--bg);
   }
   button {
     min-height: 44px;
@@ -248,7 +248,5 @@
   }
   .status {
     color: var(--dim);
-    flex-basis: 100%;
-    text-align: center;
   }
 </style>
