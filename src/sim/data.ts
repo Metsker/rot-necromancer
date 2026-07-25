@@ -30,6 +30,7 @@ export type GameState = {
   vis: number[];
   units: Unit[];
   corpses: Corpse[];
+  chests: Point[];
   stairs: Point;
   nextId: number;
   xp: number;
@@ -46,6 +47,9 @@ export const TUNING = {
   floorH: 60,
   fovRadius: 8,
   corpseTtl: 20,
+  chestsPerFloor: 5,
+  chestHeal: 10,
+  chestXp: 14,
   enemiesPerFloor: 9,
   startingMinions: 2,
   spawnEvery: 25,

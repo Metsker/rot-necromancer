@@ -35,6 +35,8 @@ export const unitAt = (g: GameState, x: number, y: number) =>
   g.units.find((u) => u.x === x && u.y === y);
 export const corpseAt = (g: GameState, x: number, y: number) =>
   g.corpses.find((c) => c.x === x && c.y === y);
+export const chestAt = (g: GameState, x: number, y: number) =>
+  g.chests.find((c) => c.x === x && c.y === y);
 export const hero = (g: GameState) => g.units.find((u) => u.creature === "hero");
 export const minions = (g: GameState) =>
   g.units.filter((u) => u.faction === "player" && u.creature !== "hero");
@@ -165,6 +167,19 @@ export function newGame(seed: number): GameState {
     return { x, y };
   });
 
+  // rot.js digs one-tile corridors; widen anything outside a room so a column can pass
+  const inRoom = (x: number, y: number) =>
+    rooms.some((r) => x >= r.getLeft() - 1 && x <= r.getRight() + 1 && y >= r.getTop() - 1 && y <= r.getBottom() + 1);
+  const widened: number[] = [];
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      if (tiles[y * w + x] !== 1 || inRoom(x, y)) continue;
+      if (y + 1 <= h - 2) widened.push((y + 1) * w + x);
+      if (x + 1 <= w - 2) widened.push(y * w + (x + 1));
+    }
+  }
+  for (const i of widened) tiles[i] = 1;
+
   const start = centers[0];
   let far = centers[0];
   for (const c of centers) if (cheb(c, start) > cheb(far, start)) far = c;
@@ -180,6 +195,7 @@ export function newGame(seed: number): GameState {
     vis: new Array<number>(w * h).fill(0),
     units: [],
     corpses: [],
+    chests: [],
     stairs: far,
     nextId: 1,
     xp: 0,
@@ -203,6 +219,16 @@ export function newGame(seed: number): GameState {
     const room = open[Math.floor(RNG.getUniform() * open.length)];
     const spot = freeNear(g, room.x, room.y);
     if (spot) spawn(g, pick(SPAWNABLE), "enemy", spot.x, spot.y);
+  }
+
+  // Rooms pay out: one chest apiece in a handful of them
+  for (let i = 0; i < TUNING.chestsPerFloor && open.length; i++) {
+    const room = open[Math.floor(RNG.getUniform() * open.length)];
+    const spot = freeNear(g, room.x, room.y);
+    if (!spot) continue;
+    if (spot.x === g.stairs.x && spot.y === g.stairs.y) continue;
+    if (g.chests.some((c) => c.x === spot.x && c.y === spot.y)) continue;
+    g.chests.push(spot);
   }
 
   // You arrive with a small retinue, so the army reads as the point from turn one
@@ -271,6 +297,16 @@ export function attack(g: GameState, attacker: Unit, target: Unit) {
   kill(g, target, attacker);
 }
 
+function gainXp(g: GameState, amount: number) {
+  g.xp += amount;
+  while (g.xp >= TUNING.xpPerLevel * (g.level + 1)) {
+    g.xp -= TUNING.xpPerLevel * (g.level + 1);
+    g.level += 1;
+    g.unspent += 1;
+    log(g, `Level ${g.level + 1}.`);
+  }
+}
+
 function kill(g: GameState, target: Unit, killer: Unit) {
   g.units = g.units.filter((u) => u.id !== target.id);
 
@@ -285,13 +321,7 @@ function kill(g: GameState, target: Unit, killer: Unit) {
   }
 
   if (killer.faction === "player" && target.faction === "enemy") {
-    g.xp += CREATURES[target.creature].xp;
-    while (g.xp >= TUNING.xpPerLevel * (g.level + 1)) {
-      g.xp -= TUNING.xpPerLevel * (g.level + 1);
-      g.level += 1;
-      g.unspent += 1;
-      log(g, `Level ${g.level + 1}.`);
-    }
+    gainXp(g, CREATURES[target.creature].xp);
   }
 
   log(g, `${CREATURES[target.creature].short} falls.`);
@@ -475,6 +505,32 @@ function tryRaise(g: GameState, x: number, y: number) {
   log(g, `Raised ${CREATURES[corpse.creature].short}.`);
 }
 
+// Rewards are spent the moment they are found, because nothing yet buys anything
+function openChest(g: GameState, x: number, y: number) {
+  const chest = chestAt(g, x, y);
+  if (!chest) return;
+  g.chests = g.chests.filter((c) => c !== chest);
+
+  const h = hero(g);
+  const roll = Math.floor(RNG.getUniform() * 3);
+
+  if (roll === 0 && h) {
+    const healed = Math.min(TUNING.chestHeal, h.maxHp - h.hp);
+    h.hp += healed;
+    log(g, healed ? `Chest: +${healed} hp.` : "Chest: nothing.");
+    return;
+  }
+  if (roll === 1) {
+    gainXp(g, TUNING.chestXp);
+    log(g, `Chest: +${TUNING.chestXp} xp.`);
+    return;
+  }
+
+  const bones = pick(SPAWNABLE);
+  g.corpses.push({ creature: bones, x, y, ttl: TUNING.corpseTtl });
+  log(g, `Chest: ${CREATURES[bones].short} bones.`);
+}
+
 export function playerStep(g: GameState, dx: number, dy: number) {
   if (g.over) return;
   const h = hero(g);
@@ -497,6 +553,7 @@ export function playerStep(g: GameState, dx: number, dy: number) {
 
   h.x = x;
   h.y = y;
+  openChest(g, x, y);
   tryRaise(g, x, y);
 
   if (x === g.stairs.x && y === g.stairs.y) {

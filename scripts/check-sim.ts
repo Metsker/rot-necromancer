@@ -40,6 +40,7 @@ function sandbox(): GameState {
     vis: new Array<number>(w * h).fill(1),
     units: [],
     corpses: [],
+    chests: [],
     stairs: { x: 10, y: 10 },
     nextId: 1,
     xp: 0,
@@ -65,6 +66,85 @@ test("generated floor is coherent", () => {
   assert.ok(isFloor(g, g.stairs.x, g.stairs.y), "stairs in rock");
   assert.equal(g.units.filter((u) => u.creature === "ossuary").length, 1, "boss count");
   for (const u of g.units) assert.ok(isFloor(g, u.x, u.y), `${u.creature} in rock`);
+});
+
+test("the outer wall stays solid and the floor is one connected space", () => {
+  for (const seed of [11, 22, 33]) {
+    const g = newGame(seed);
+    for (let x = 0; x < g.w; x++) {
+      assert.ok(!isFloor(g, x, 0) && !isFloor(g, x, g.h - 1), `seed ${seed}: floor on the top or bottom edge`);
+    }
+    for (let y = 0; y < g.h; y++) {
+      assert.ok(!isFloor(g, 0, y) && !isFloor(g, g.w - 1, y), `seed ${seed}: floor on the left or right edge`);
+    }
+
+    const h = hero(g)!;
+    const seen = new Set<number>([h.y * g.w + h.x]);
+    const queue = [{ x: h.x, y: h.y }];
+    while (queue.length) {
+      const p = queue.pop()!;
+      for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+        const x = p.x + dx;
+        const y = p.y + dy;
+        const k = y * g.w + x;
+        if (!isFloor(g, x, y) || seen.has(k)) continue;
+        seen.add(k);
+        queue.push({ x, y });
+      }
+    }
+
+    assert.ok(seen.has(g.stairs.y * g.w + g.stairs.x), `seed ${seed}: the stair is walled off`);
+    for (const u of g.units) {
+      assert.ok(seen.has(u.y * g.w + u.x), `seed ${seed}: ${u.creature} is sealed away from the hero`);
+    }
+    for (const c of g.chests) {
+      assert.ok(seen.has(c.y * g.w + c.x), `seed ${seed}: a chest is unreachable`);
+    }
+  }
+});
+
+test("corridors are wide enough for a column to pass", () => {
+  for (const seed of [11, 22, 33]) {
+    const g = newGame(seed);
+    let floor = 0;
+    let pinch = 0;
+    for (let y = 1; y < g.h - 1; y++) {
+      for (let x = 1; x < g.w - 1; x++) {
+        if (!isFloor(g, x, y)) continue;
+        floor++;
+        const n = isFloor(g, x, y - 1);
+        const s = isFloor(g, x, y + 1);
+        const e = isFloor(g, x + 1, y);
+        const w = isFloor(g, x - 1, y);
+        if ((!n && !s) || (!e && !w)) pinch++;
+      }
+    }
+    // raw Digger output sits around 27-43%; widening should leave only ends and corners
+    assert.ok(pinch / floor < 0.12, `seed ${seed}: ${((pinch / floor) * 100).toFixed(0)}% of floor is single file`);
+  }
+});
+
+test("a chest pays out once and is gone", () => {
+  RNG.setSeed(5);
+  const g = sandbox();
+  const h = spawn(g, "hero", "player", 5, 5);
+  h.hp = 10;
+  g.chests.push({ x: 6, y: 5 });
+
+  const before = { hp: h.hp, xp: g.xp, level: g.level, corpses: g.corpses.length };
+  playerStep(g, 1, 0);
+
+  assert.equal(g.chests.length, 0, "chest survived being opened");
+  const paid =
+    h.hp > before.hp ||
+    g.xp !== before.xp ||
+    g.level > before.level ||
+    g.corpses.length > before.corpses;
+  assert.ok(paid, "chest paid out nothing at all");
+
+  playerStep(g, -1, 0);
+  playerStep(g, 1, 0);
+  assert.equal(g.chests.length, 0, "a chest was reopened");
 });
 
 test("raising is deterministic and bounded by the command cap", () => {

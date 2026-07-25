@@ -1,12 +1,22 @@
 import type Display from "rot-js/lib/display/display.js";
 import { CREATURES, STAT_LABEL, type GameState, type Point } from "./sim/data.ts";
-import { commandCap, corpseAt, explored, hero, minions, unitAt, visible } from "./sim/game.ts";
+import {
+  chestAt,
+  commandCap,
+  corpseAt,
+  explored,
+  hero,
+  minions,
+  unitAt,
+  visible,
+} from "./sim/game.ts";
 import { PALETTE } from "./tilemap.ts";
 
 const WALL = "▓";
 const FLOOR_CH = ".";
 const CORPSE = "%";
 const STAIR = ">";
+const CHEST = "⩀";
 
 const INK = PALETTE[23];
 const DARK = PALETTE[2];
@@ -123,6 +133,12 @@ export function render(
       if (!wall && g.stairs.x === x && g.stairs.y === y) {
         ch = STAIR;
         fg = lit ? STAIR_COL : DIM_WALL;
+      }
+
+      // Chests are remembered once seen, so you can come back for one you walked past
+      if (chestAt(g, x, y)) {
+        ch = CHEST;
+        fg = lit ? GOLD : DIM_WALL;
       }
 
       // Remembered terrain shows, but only what is currently lit shows its occupants
