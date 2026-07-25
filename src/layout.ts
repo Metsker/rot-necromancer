@@ -1,6 +1,6 @@
 import { TILE } from "./tilemap.ts";
 
-export const TARGET_TILE_CSS = 16;
+export const TARGET_TILE_CSS = 24;
 export const MAX_COLS = 64;
 export const MAX_ROWS = 64;
 
