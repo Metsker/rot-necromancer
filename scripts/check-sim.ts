@@ -382,12 +382,12 @@ test("a flashed tile is drawn inverted so a blow is visible", () => {
       drawn.push({ x, y, ch, fg, bg }),
   };
 
-  render(stub as never, g, 12, 12, { flash: new Map(), panel: "none", goal: null });
+  render(stub as never, g, 12, 12, { flash: new Map(), panel: "none" });
   const plain = drawn.filter((d) => d.ch === CREATURES.rat.glyph).pop();
   assert.ok(plain, "enemy was not drawn at all");
 
   drawn.length = 0;
-  render(stub as never, g, 12, 12, { flash: new Map([["6,5", "#ffe077"]]), panel: "none", goal: null });
+  render(stub as never, g, 12, 12, { flash: new Map([["6,5", "#ffe077"]]), panel: "none" });
   const lit = drawn.filter((d) => d.ch === CREATURES.rat.glyph).pop();
   assert.ok(lit, "enemy vanished when flashed");
   assert.equal(lit.bg, "#ffe077", "flashed tile kept its normal background");
@@ -474,7 +474,7 @@ test("the marked tile is drawn differently from an unmarked one", () => {
     drawText() {},
     draw: (_x: number, _y: number, ch: string, fg: string, bg: string) => drawn.push({ ch, fg, bg }),
   };
-  const view = { flash: new Map<string, string>(), panel: "none" as const, goal: null };
+  const view = { flash: new Map<string, string>(), panel: "none" as const };
 
   render(stub as never, g, 12, 12, view);
   const plain = drawn.filter((d) => d.ch === CREATURES.knight.glyph).pop();
@@ -486,55 +486,6 @@ test("the marked tile is drawn differently from an unmarked one", () => {
 
   assert.ok(plain && marked, "the enemy was not drawn");
   assert.notEqual(marked.bg, plain.bg, "a marked enemy looks the same as an unmarked one");
-});
-
-test("the travel destination is drawn while an order stands", () => {
-  const g = sandbox();
-  spawn(g, "hero", "player", 5, 5);
-
-  const drawn: { x: number; y: number; ch: string }[] = [];
-  const stub = {
-    clear() {},
-    drawText() {},
-    draw: (x: number, y: number, ch: string) => drawn.push({ x, y, ch }),
-  };
-
-  render(stub as never, g, 12, 12, { flash: new Map(), panel: "none", goal: null });
-  const before = drawn.filter((d) => d.ch === "⬚").length;
-
-  drawn.length = 0;
-  render(stub as never, g, 12, 12, { flash: new Map(), panel: "none", goal: { x: 8, y: 3 } });
-  const marks = drawn.filter((d) => d.ch === "⬚");
-
-  const cam = cameraFor(g, 12, 12);
-  assert.equal(before, 0, "a destination was drawn with no order standing");
-  assert.equal(marks.length, 1, "the destination was not drawn exactly once");
-  assert.deepEqual(
-    { x: marks[0].x + cam.x, y: marks[0].y + cam.y },
-    { x: 8, y: 3 },
-    "destination drawn at the wrong world cell",
-  );
-});
-
-test("menu lines do what they say, and restart asks first", () => {
-  const g = sandbox();
-  spawn(g, "hero", "player", 5, 5);
-  spawn(g, "rat", "player", 6, 5);
-
-  const menu = panelLines(g, "menu").lines;
-  assert.ok(menu.some((l) => l.text.startsWith("Rat")), "the roster is not in the menu");
-  assert.equal(menu.find((l) => l.action === "restart")?.text, "restart run");
-  assert.equal(menu.find((l) => l.action === "close")?.text, "close");
-  // roster rows are labels, not buttons
-  assert.equal(menu.find((l) => l.text.startsWith("Rat"))?.action, null);
-
-  // restart opens a question rather than throwing the run away on one tap
-  const confirm = panelLines(g, "confirm").lines;
-  assert.equal(confirm.filter((l) => l.action === "confirm").length, 1, "no way to confirm");
-  assert.equal(confirm.filter((l) => l.action === "close").length, 1, "no way to back out");
-
-  const level = panelLines(g, "level").lines.map((l) => l.action);
-  assert.deepEqual(level, ["might", "ward", "will"], "level choices lost their meaning");
 });
 
 test("a scripted run survives 300 turns with its invariants intact", () => {

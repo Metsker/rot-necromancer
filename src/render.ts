@@ -18,7 +18,6 @@ const FLOOR_CH = ".";
 const CORPSE = "%";
 const STAIR = ">";
 const CHEST = "⩀";
-const GOAL = "⬚";
 
 const INK = PALETTE[23];
 const DARK = PALETTE[2];
@@ -33,7 +32,6 @@ const BTN = PALETTE[6];
 const BTN_ALT = PALETTE[10];
 const GOLD = PALETTE[16];
 const MARK = PALETTE[14];
-const GOAL_COL = PALETTE[22];
 
 // log, status, then a two-row button strip so a thumb has ~48px to land on
 export const HUD_ROWS = 4;
@@ -145,11 +143,10 @@ export function zoneAt(
 export type View = {
   flash: Map<string, string>;
   panel: Panel;
-  goal: Point | null;
 };
 
 export function render(d: Display, g: GameState, cols: number, rows: number, view: View) {
-  const { flash, panel, goal } = view;
+  const { flash, panel } = view;
   const mark = targetOf(g);
   const cam = cameraFor(g, cols, rows);
   const height = viewRows(rows);
@@ -190,12 +187,6 @@ export function render(d: Display, g: GameState, cols: number, rows: number, vie
           ch = t.glyph;
           fg = unit.faction === "player" && unit.creature !== "hero" ? INK : PALETTE[t.color];
         }
-      }
-
-      // Where you told them to go, and what you told them to kill
-      if (goal && goal.x === x && goal.y === y && !unitAt(g, x, y)) {
-        ch = GOAL;
-        fg = GOAL_COL;
       }
 
       const hit = flash.get(`${x},${y}`);

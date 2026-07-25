@@ -29,7 +29,6 @@
   const HURT_YOU = PALETTE[15];
   const HURT_THEM = PALETTE[17];
   const FATAL = PALETTE[23];
-  const ORDER_MOVE = PALETTE[22];
   const ORDER_KILL = PALETTE[14];
   const ORDER_DENIED = PALETTE[6];
   // ponytail: a plain cap, so an unreachable mark cannot spin the clock forever
@@ -46,7 +45,6 @@
   let rows = 1;
   let panel: Panel = "none";
   let walk: Point[] = [];
-  let goal: Point | null = null;
   let engaging = 0;
   let flashes: { x: number; y: number; color: string; until: number }[] = [];
 
@@ -77,7 +75,6 @@
 
   function stop() {
     walk = [];
-    goal = null;
     engaging = 0;
   }
 
@@ -85,7 +82,6 @@
     clearSave();
     game = newGame(Math.floor(Math.random() * 1e9));
     walk = [];
-    goal = null;
     engaging = 0;
     flashes = [];
     panel = "none";
@@ -149,7 +145,6 @@
     const dy = zone.y - h.y;
     if (Math.abs(dx) <= 1 && Math.abs(dy) <= 1) {
       stop();
-      flash(zone.x, zone.y, ORDER_MOVE);
       return act(() => playerStep(game, dx, dy));
     }
 
@@ -159,8 +154,6 @@
     stop();
     setTarget(game, null);
     walk = route;
-    goal = { x: zone.x, y: zone.y };
-    flash(zone.x, zone.y, ORDER_MOVE);
   }
 
   function flash(x: number, y: number, color: string) {
@@ -205,7 +198,6 @@
     }
     walk = walk.slice(1);
     act(() => playerStep(game, next.x - h.x, next.y - h.y));
-    if (!walk.length) goal = null;
     // Travel stops the moment something hostile is in view, as tap-to-move promised
     if (enemiesInView(game) > 0 || panel !== "none") stop();
   }
@@ -293,7 +285,7 @@
           if (flashes.length) flashes = flashes.filter((f) => f.until > now);
           const lit = new Map<string, string>();
           for (const f of flashes) lit.set(`${f.x},${f.y}`, f.color);
-          render(display, game, cols, rows, { flash: lit, panel, goal });
+          render(display, game, cols, rows, { flash: lit, panel });
         };
         let raf = requestAnimationFrame(loop);
 
