@@ -19,7 +19,15 @@ import {
   setTarget,
   spawn,
 } from "../src/sim/game.ts";
-import { BTN_ROWS, HUD_ROWS, cameraFor, panelRect, render, zoneAt } from "../src/render.ts";
+import {
+  BTN_ROWS,
+  HUD_ROWS,
+  cameraFor,
+  panelLines,
+  panelRect,
+  render,
+  zoneAt,
+} from "../src/render.ts";
 
 const tests: [string, () => void][] = [];
 const test = (name: string, fn: () => void) => tests.push([name, fn]);
@@ -395,7 +403,7 @@ test("taps land on what was drawn", () => {
   const left = zoneAt(g, "none", cols, rows, 2, rows - 1);
   const right = zoneAt(g, "none", cols, rows, cols - 2, rows - BTN_ROWS);
   assert.equal(left.kind, "wait", "left of the strip is not WAIT");
-  assert.equal(right.kind, "army", "right of the strip is not ARMY");
+  assert.equal(right.kind, "menu", "right of the strip is not MENU");
 
   // both button rows must answer, or the 48px target is a lie
   assert.equal(zoneAt(g, "none", cols, rows, 2, rows - BTN_ROWS).kind, "wait");
@@ -506,6 +514,27 @@ test("the travel destination is drawn while an order stands", () => {
     { x: 8, y: 3 },
     "destination drawn at the wrong world cell",
   );
+});
+
+test("menu lines do what they say, and restart asks first", () => {
+  const g = sandbox();
+  spawn(g, "hero", "player", 5, 5);
+  spawn(g, "rat", "player", 6, 5);
+
+  const menu = panelLines(g, "menu").lines;
+  assert.ok(menu.some((l) => l.text.startsWith("Rat")), "the roster is not in the menu");
+  assert.equal(menu.find((l) => l.action === "restart")?.text, "restart run");
+  assert.equal(menu.find((l) => l.action === "close")?.text, "close");
+  // roster rows are labels, not buttons
+  assert.equal(menu.find((l) => l.text.startsWith("Rat"))?.action, null);
+
+  // restart opens a question rather than throwing the run away on one tap
+  const confirm = panelLines(g, "confirm").lines;
+  assert.equal(confirm.filter((l) => l.action === "confirm").length, 1, "no way to confirm");
+  assert.equal(confirm.filter((l) => l.action === "close").length, 1, "no way to back out");
+
+  const level = panelLines(g, "level").lines.map((l) => l.action);
+  assert.deepEqual(level, ["might", "ward", "will"], "level choices lost their meaning");
 });
 
 test("a scripted run survives 300 turns with its invariants intact", () => {

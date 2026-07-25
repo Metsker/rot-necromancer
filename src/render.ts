@@ -39,11 +39,13 @@ const GOAL_COL = PALETTE[22];
 export const HUD_ROWS = 4;
 export const BTN_ROWS = 2;
 
-export type Panel = "none" | "army" | "level" | "over";
+export type Panel = "none" | "menu" | "level" | "over" | "confirm";
+export type Action = "close" | "restart" | "confirm" | "might" | "ward" | "will";
+export type PanelLine = { text: string; action: Action | null };
 export type Zone =
   | { kind: "map"; x: number; y: number }
   | { kind: "wait" }
-  | { kind: "army" }
+  | { kind: "menu" }
   | { kind: "line"; index: number }
   | { kind: "none" };
 
@@ -60,26 +62,55 @@ export function cameraFor(g: GameState, cols: number, rows: number): Point {
   };
 }
 
-export function panelLines(g: GameState, panel: Panel): { title: string; lines: string[] } {
-  if (panel === "army") {
-    const roster = minions(g).map((u) => `${CREATURES[u.creature].short} ${u.hp}/${u.maxHp}`);
+// Text and what it does live together, so a line cannot mean one thing and do another
+export function panelLines(g: GameState, panel: Panel): { title: string; lines: PanelLine[] } {
+  if (panel === "menu") {
+    const roster = minions(g).map((u) => ({
+      text: `${CREATURES[u.creature].short} ${u.hp}/${u.maxHp}`,
+      action: null,
+    }));
     return {
       title: `ARMY ${minions(g).length}/${commandCap(g)}`,
-      lines: [...(roster.length ? roster : ["nothing raised"]), "close"],
+      lines: [
+        ...(roster.length ? roster : [{ text: "nothing raised", action: null }]),
+        { text: "", action: null },
+        { text: "restart run", action: "restart" as const },
+        { text: "close", action: "close" as const },
+      ],
+    };
+  }
+  if (panel === "confirm") {
+    return {
+      title: "RESTART?",
+      lines: [
+        { text: "this run is lost", action: null },
+        { text: "yes, restart", action: "confirm" },
+        { text: "no, keep going", action: "close" },
+      ],
     };
   }
   if (panel === "level") {
-    return { title: `LEVEL ${g.level + 1}`, lines: Object.values(STAT_LABEL) };
+    return {
+      title: `LEVEL ${g.level + 1}`,
+      lines: [
+        { text: STAT_LABEL.might, action: "might" },
+        { text: STAT_LABEL.ward, action: "ward" },
+        { text: STAT_LABEL.will, action: "will" },
+      ],
+    };
   }
   return {
     title: g.over === "dead" ? "YOU FELL" : "YOU DESCEND",
-    lines: [g.over === "dead" ? "the army crumbles" : "no floor 2 yet", "new run"],
+    lines: [
+      { text: g.over === "dead" ? "the army crumbles" : "no floor 2 yet", action: null },
+      { text: "new run", action: "confirm" },
+    ],
   };
 }
 
 export function panelRect(g: GameState, panel: Panel, cols: number, rows: number) {
   const { title, lines } = panelLines(g, panel);
-  const width = Math.min(cols, Math.max(title.length, ...lines.map((l) => l.length)) + 4);
+  const width = Math.min(cols, Math.max(title.length, ...lines.map((l) => l.text.length)) + 4);
   const height = lines.length + 3;
   return {
     x: Math.max(0, (cols - width) >> 1),
@@ -105,7 +136,7 @@ export function zoneAt(
       sx >= r.x && sx < r.x + r.w && index >= 0 && index < panelLines(g, panel).lines.length;
     return within ? { kind: "line", index } : { kind: "none" };
   }
-  if (sy >= rows - BTN_ROWS) return sx < cols >> 1 ? { kind: "wait" } : { kind: "army" };
+  if (sy >= rows - BTN_ROWS) return sx < cols >> 1 ? { kind: "wait" } : { kind: "menu" };
   if (sy >= viewRows(rows)) return { kind: "none" };
   const cam = cameraFor(g, cols, rows);
   return { kind: "map", x: sx + cam.x, y: sy + cam.y };
@@ -207,7 +238,7 @@ function drawHud(d: Display, g: GameState, cols: number, rows: number) {
     fill(d, half, top + r, cols - half, BTN_ALT);
   }
   label(d, 0, top, half, "WAIT", BTN);
-  label(d, half, top, cols - half, "ARMY", BTN_ALT);
+  label(d, half, top, cols - half, "MENU", BTN_ALT);
 }
 
 function drawPanel(d: Display, g: GameState, panel: Panel, cols: number, rows: number) {
@@ -230,7 +261,8 @@ function drawPanel(d: Display, g: GameState, panel: Panel, cols: number, rows: n
 
   label(d, r.x + 1, r.y + 1, r.w - 2, title, DARK);
   lines.forEach((line, i) => {
-    const text = line.slice(0, r.w - 2);
-    for (let c = 0; c < text.length; c++) d.draw(r.x + 1 + c, r.y + 2 + i, text[c], INK, DARK);
+    const text = line.text.slice(0, r.w - 2);
+    const fg = line.action ? INK : DIM;
+    for (let c = 0; c < text.length; c++) d.draw(r.x + 1 + c, r.y + 2 + i, text[c], fg, DARK);
   });
 }

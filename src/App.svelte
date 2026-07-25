@@ -21,7 +21,7 @@
     unitAt,
     visible,
   } from "./sim/game.ts";
-  import { type Panel, render, zoneAt } from "./render.ts";
+  import { type Action, type Panel, panelLines, render, zoneAt } from "./render.ts";
 
   const STEP_MS = 70;
   const FLASH_MS = 170;
@@ -92,24 +92,33 @@
   }
 
   function onLine(index: number) {
-    if (panel === "level") {
-      chooseStat(game, STATS[index]);
-      panel = game.unspent > 0 ? "level" : "none";
-      save(game);
+    const action: Action | null = panelLines(game, panel).lines[index]?.action ?? null;
+    if (!action) return;
+
+    if (action === "close") {
+      panel = game.over ? "over" : "none";
       return;
     }
-    if (panel === "over") {
-      if (index === 1) newRun();
+    if (action === "restart") {
+      panel = "confirm";
       return;
     }
-    panel = "none";
+    if (action === "confirm") {
+      newRun();
+      return;
+    }
+
+    chooseStat(game, action as Stat);
+    panel = game.unspent > 0 ? "level" : "none";
+    save(game);
   }
 
   function onTap(sx: number, sy: number) {
     const zone = zoneAt(game, panel, cols, rows, sx, sy);
     if (zone.kind === "line") return onLine(zone.index);
     if (zone.kind === "none") {
-      if (panel === "army") panel = "none";
+      // tapping away from the sheet dismisses it, but not one you must answer
+      if (panel === "menu" || panel === "confirm") panel = game.over ? "over" : "none";
       return;
     }
     if (panel !== "none") return;
@@ -118,8 +127,9 @@
       stop();
       return act(() => playerWait(game));
     }
-    if (zone.kind === "army") {
-      panel = "army";
+    if (zone.kind === "menu") {
+      stop();
+      panel = "menu";
       return;
     }
 
