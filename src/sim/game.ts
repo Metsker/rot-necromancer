@@ -200,6 +200,7 @@ export function newGame(seed: number): GameState {
     stairs: far,
     nextId: 1,
     xp: 0,
+    gold: 0,
     level: 0,
     build: { might: 0, ward: 0, will: 0 },
     unspent: 0,
@@ -529,23 +530,27 @@ function openChest(g: GameState, x: number, y: number) {
   g.chests = g.chests.filter((c) => c !== chest);
 
   const h = hero(g);
+  const span = TUNING.chestGoldMax - TUNING.chestGoldMin + 1;
+  const coin = TUNING.chestGoldMin + Math.floor(RNG.getUniform() * span);
+  g.gold += coin;
+
   const roll = Math.floor(RNG.getUniform() * 3);
 
   if (roll === 0 && h) {
     const healed = Math.min(TUNING.chestHeal, h.maxHp - h.hp);
     h.hp += healed;
-    log(g, healed ? `Chest: +${healed} hp.` : "Chest: nothing.");
+    log(g, healed ? `+${coin}g, +${healed}hp.` : `+${coin} gold.`);
     return;
   }
   if (roll === 1) {
     gainXp(g, TUNING.chestXp);
-    log(g, `Chest: +${TUNING.chestXp} xp.`);
+    log(g, `+${coin}g, +${TUNING.chestXp}xp.`);
     return;
   }
 
   const bones = pick(SPAWNABLE);
   g.corpses.push({ creature: bones, x, y, ttl: TUNING.corpseTtl });
-  log(g, `Chest: ${CREATURES[bones].short} bones.`);
+  log(g, `+${coin}g, ${CREATURES[bones].short}.`);
 }
 
 export function playerStep(g: GameState, dx: number, dy: number) {
@@ -614,13 +619,13 @@ const KEY = "necromancer.save";
 
 // Bump whenever GameState changes shape. A save from an older shape is thrown away
 // rather than half-read: a missing field crashes the render loop on the first frame.
-const SAVE_VERSION = 3;
+const SAVE_VERSION = 4;
 
 // Checked as well as the version, because the likely mistake is adding a field
 // and forgetting to bump: a missing one crashes the renderer on the first frame
 const REQUIRED: (keyof GameState)[] = [
   "seed", "rngState", "turn", "w", "h", "tiles", "explored", "vis", "units",
-  "corpses", "chests", "stairs", "nextId", "xp", "level", "build", "unspent",
+  "corpses", "chests", "stairs", "nextId", "xp", "gold", "level", "build", "unspent",
   "spawned", "log", "over", "target",
 ];
 

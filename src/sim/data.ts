@@ -35,6 +35,7 @@ export type GameState = {
   stairs: Point;
   nextId: number;
   xp: number;
+  gold: number;
   level: number;
   build: Record<Stat, number>;
   unspent: number;
@@ -50,6 +51,8 @@ export const TUNING = {
   corpseTtl: 20,
   chestsPerFloor: 5,
   chestHeal: 10,
+  chestGoldMin: 6,
+  chestGoldMax: 20,
   chestXp: 14,
   enemiesPerFloor: 9,
   startingMinions: 2,

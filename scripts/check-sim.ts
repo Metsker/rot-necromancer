@@ -26,6 +26,7 @@ import {
   panelLines,
   panelRect,
   render,
+  statusLine,
   zoneAt,
 } from "../src/render.ts";
 
@@ -54,6 +55,7 @@ function sandbox(): GameState {
     stairs: { x: 10, y: 10 },
     nextId: 1,
     xp: 0,
+    gold: 0,
     level: 0,
     build: { might: 0, ward: 0, will: 0 },
     unspent: 0,
@@ -486,6 +488,28 @@ test("the marked tile is drawn differently from an unmarked one", () => {
 
   assert.ok(plain && marked, "the enemy was not drawn");
   assert.notEqual(marked.bg, plain.bg, "a marked enemy looks the same as an unmarked one");
+});
+
+test("chests pay gold, and the counter never outgrows the row", () => {
+  RNG.setSeed(9);
+  const g = sandbox();
+  spawn(g, "hero", "player", 5, 5);
+  g.chests.push({ x: 6, y: 5 });
+
+  assert.equal(g.gold, 0, "started with gold");
+  playerStep(g, 1, 0);
+  assert.ok(g.gold >= TUNING.chestGoldMin && g.gold <= TUNING.chestGoldMax, `chest paid ${g.gold}`);
+
+  // the phone this is built for gets sixteen columns, and the log has to fit too
+  for (const cols of [16, 20, 24, 40]) {
+    g.gold = 99999;
+    g.level = 42;
+    assert.ok(
+      statusLine(g, cols).plain.length <= cols,
+      `status is ${statusLine(g, cols).plain.length} wide in ${cols} columns`,
+    );
+  }
+  for (const line of g.log) assert.ok(line.length <= 16, `log line does not fit: "${line}"`);
 });
 
 test("a scripted run survives 300 turns with its invariants intact", () => {

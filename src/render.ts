@@ -68,7 +68,7 @@ export function panelLines(g: GameState, panel: Panel): { title: string; lines: 
       action: null,
     }));
     return {
-      title: `ARMY ${minions(g).length}/${commandCap(g)}`,
+      title: `L${g.level + 1}  ARMY ${minions(g).length}/${commandCap(g)}`,
       lines: [
         ...(roster.length ? roster : [{ text: "nothing raised", action: null }]),
         { text: "", action: null },
@@ -210,17 +210,37 @@ function label(d: Display, x: number, y: number, w: number, text: string, bg: st
   for (let i = 0; i < t.length; i++) d.draw(at + i, y, t[i], INK, bg);
 }
 
-function drawHud(d: Display, g: GameState, cols: number, rows: number) {
+// Sixteen columns is all a phone has here, so the line sheds detail until it fits
+export function statusLine(g: GameState, cols: number) {
   const h = hero(g);
-  const hp = h ? `${h.hp}/${h.maxHp}` : "--";
+  const cap = `${minions(g).length}/${commandCap(g)}`;
+  const lvl = `${g.level + 1}`;
+  const gold = `${g.gold}`;
 
+  const build = (hp: string, coin: string, withLevel: boolean) => ({
+    plain: `♥${hp} †${cap} $${coin}` + (withLevel ? ` L${lvl}` : ""),
+    text:
+      `%c{${PALETTE[15]}}♥%c{${INK}}${hp} %c{${PALETTE[20]}}†%c{${INK}}${cap}` +
+      ` %c{${GOLD}}$%c{${INK}}${coin}` +
+      (withLevel ? ` %c{${GOLD}}L%c{${INK}}${lvl}` : ""),
+  });
+
+  const full = h ? `${h.hp}/${h.maxHp}` : "--";
+  const bare = h ? `${h.hp}` : "--";
+  const short = g.gold >= 1000 ? `${Math.floor(g.gold / 1000)}k` : gold;
+
+  const options = [
+    build(full, gold, true),
+    build(full, gold, false),
+    build(full, short, false),
+    build(bare, short, false),
+  ];
+  return options.find((o) => o.plain.length <= cols) ?? options[options.length - 1];
+}
+
+function drawHud(d: Display, g: GameState, cols: number, rows: number) {
   d.drawText(0, rows - 4, `%c{${DIM}}${(g.log[g.log.length - 1] ?? "").slice(0, cols)}`, cols);
-  d.drawText(
-    0,
-    rows - 3,
-    `%c{${PALETTE[15]}}♥%c{${INK}}${hp} %c{${PALETTE[20]}}†%c{${INK}}${minions(g).length}/${commandCap(g)} %c{${GOLD}}L%c{${INK}}${g.level + 1}`,
-    cols,
-  );
+  d.drawText(0, rows - 3, statusLine(g, cols).text, cols);
 
   const half = cols >> 1;
   const top = rows - BTN_ROWS;
