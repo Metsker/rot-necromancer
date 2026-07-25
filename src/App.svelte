@@ -33,6 +33,9 @@
   let fps = $state(0);
   let stress = $state(false);
   let scale = $state(1);
+  let dpr = $state(1);
+
+  const HUD_PX = 96;
 
   const webgl2 = !!document.createElement("canvas").getContext("webgl2");
   const glyphs = Object.keys(TILE_MAP);
@@ -68,16 +71,18 @@
     }
   }
 
+  // Integer scale is chosen in device pixels, so a 3x phone gets 3x the budget
   function fit(canvas: HTMLCanvasElement) {
+    dpr = window.devicePixelRatio || 1;
     scale = Math.max(
       1,
       Math.min(
-        Math.floor(window.innerWidth / (W * TILE)),
-        Math.floor((window.innerHeight - 96) / (H * TILE)),
+        Math.floor((window.innerWidth * dpr) / (W * TILE)),
+        Math.floor(((window.innerHeight - HUD_PX) * dpr) / (H * TILE)),
       ),
     );
-    canvas.style.width = `${W * TILE * scale}px`;
-    canvas.style.height = `${H * TILE * scale}px`;
+    canvas.style.width = `${(W * TILE * scale) / dpr}px`;
+    canvas.style.height = `${(H * TILE * scale) / dpr}px`;
   }
 
   $effect(() => {
@@ -112,6 +117,7 @@
         const canvas = display.getContainer() as HTMLCanvasElement;
         canvas.style.imageRendering = "pixelated";
         canvas.style.touchAction = "manipulation";
+        document.body.style.background = BG;
         host.appendChild(canvas);
 
         const onTap = (e: PointerEvent) => {
@@ -163,13 +169,13 @@
   }
 </script>
 
-<main style="--bg:{PALETTE[0]}; --ink:{PALETTE[23]}; --dim:{PALETTE[9]}">
+<main style="--bg:{PALETTE[2]}; --ink:{PALETTE[23]}; --dim:{PALETTE[9]}">
   <div class="stage" bind:this={host}></div>
   <div class="hud">
     <button onclick={toggleStress} class:on={stress}>
       {stress ? "stop stress" : "stress test"}
     </button>
-    <span>scale ×{scale}</span>
+    <span>×{scale} dpr{dpr}</span>
     <span>{fps} fps</span>
     <span>tap {tapped}</span>
   </div>
@@ -179,7 +185,6 @@
 <style>
   :global(body) {
     margin: 0;
-    background: #000;
     overscroll-behavior: none;
   }
   main {
