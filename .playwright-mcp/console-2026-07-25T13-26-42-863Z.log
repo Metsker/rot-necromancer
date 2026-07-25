@@ -1,0 +1,4 @@
+[      25ms] TypeError: Cannot read properties of undefined (reading 'find')
+    at jr (https://metsker.github.io/rot-necromancer/assets/index-DjmwzVjU.js:41:18549)
+    at Ii (https://metsker.github.io/rot-necromancer/assets/index-DjmwzVjU.js:41:27618)
+    at _ (https://metsker.github.io/rot-necromancer/assets/index-DjmwzVjU.js:41:31400)

@@ -595,9 +595,21 @@ export function enemiesInView(g: GameState) {
 
 const KEY = "necromancer.save";
 
+// Bump whenever GameState changes shape. A save from an older shape is thrown away
+// rather than half-read: a missing field crashes the render loop on the first frame.
+const SAVE_VERSION = 2;
+
+// Checked as well as the version, because the likely mistake is adding a field
+// and forgetting to bump: a missing one crashes the renderer on the first frame
+const REQUIRED: (keyof GameState)[] = [
+  "seed", "rngState", "turn", "w", "h", "tiles", "explored", "vis", "units",
+  "corpses", "chests", "stairs", "nextId", "xp", "level", "build", "unspent",
+  "spawned", "log", "over",
+];
+
 export function save(g: GameState) {
   try {
-    localStorage.setItem(KEY, JSON.stringify(g));
+    localStorage.setItem(KEY, JSON.stringify({ v: SAVE_VERSION, g }));
   } catch {
     // a full or blocked store must not take the run down with it
   }
@@ -607,9 +619,11 @@ export function load(): GameState | null {
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return null;
-    const g = JSON.parse(raw) as GameState;
-    RNG.setState(g.rngState);
-    return g;
+    const held = JSON.parse(raw) as { v?: number; g?: GameState };
+    if (held?.v !== SAVE_VERSION || !held.g) return null;
+    if (REQUIRED.some((k) => !(k in held.g!))) return null;
+    RNG.setState(held.g.rngState);
+    return held.g;
   } catch {
     return null;
   }

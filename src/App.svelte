@@ -139,7 +139,11 @@
 
   $effect(() => {
     if (!host) return;
-    if (!document.createElement("canvas").getContext("webgl2")) return;
+    if (!document.createElement("canvas").getContext("webgl2")) {
+      host.textContent = "This browser has no WebGL2, which the tile renderer needs.";
+      host.style.cssText = `color:${PALETTE[23]};font:14px/1.5 ui-monospace,monospace;padding:24px`;
+      return;
+    }
 
     let disposed = false;
     let cleanup = () => {};
@@ -196,6 +200,8 @@
         let last = performance.now();
         let since = 0;
         const loop = (now: number) => {
+          // Re-armed first: one bad frame must not end the loop for good
+          raf = requestAnimationFrame(loop);
           since += now - last;
           last = now;
           if (since >= STEP_MS) {
@@ -206,7 +212,6 @@
           const flash = new Map<string, string>();
           for (const f of flashes) flash.set(`${f.x},${f.y}`, f.color);
           render(display, game, cols, rows, flash, panel);
-          raf = requestAnimationFrame(loop);
         };
         let raf = requestAnimationFrame(loop);
 

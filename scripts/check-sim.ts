@@ -262,6 +262,31 @@ test("a save round-trips through storage with its RNG state", () => {
   assert.equal(RNG.getUniform(), expected, "reloading re-rolled the RNG");
 });
 
+test("a save written by an older build is refused, not half-read", () => {
+  const store = new Map<string, string>();
+  (globalThis as { localStorage?: unknown }).localStorage = {
+    getItem: (k: string) => store.get(k) ?? null,
+    setItem: (k: string, v: string) => void store.set(k, v),
+    removeItem: (k: string) => void store.delete(k),
+  };
+
+  const g = newGame(5150);
+  save(g);
+
+  // the shape this project shipped before chests existed: valid JSON, missing a field
+  const held = JSON.parse(store.get("necromancer.save")!);
+  delete held.g.chests;
+  store.set("necromancer.save", JSON.stringify(held));
+  assert.equal(load(), null, "a save missing a field was handed back and would crash the renderer");
+
+  // an unversioned save from any earlier build goes the same way
+  store.set("necromancer.save", JSON.stringify(g));
+  assert.equal(load(), null, "an unversioned save was accepted");
+
+  store.set("necromancer.save", "{ not json");
+  assert.equal(load(), null, "malformed storage was not survived");
+});
+
 test("minions keep up with a walking hero", () => {
   const g = sandbox();
   const h = spawn(g, "hero", "player", 2, 5);
