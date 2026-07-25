@@ -7,7 +7,7 @@
     "dev": "npm run gen && vite",
     "build": "npm run check && vite build",
     "preview": "vite preview --host",
-    "check": "npm run gen && node scripts/check-layout.ts"
+    "check": "npm run gen && node scripts/check-layout.ts && node scripts/check-sim.ts"
   },
   "keywords": [],
   "author": "",

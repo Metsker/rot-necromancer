@@ -1,44 +1,108 @@
 <script lang="ts">
-  import { Display } from "rot-js";
-  import { TILE, TILE_MAP, SHEET, PALETTE } from "./tilemap";
+  import Display from "rot-js/lib/display/display.js";
+  import { TILE, TILE_MAP, PALETTE } from "./tilemap";
   import { loadTileset } from "./tileset";
   import { computeLayout } from "./layout";
+  import { CREATURES, STAT_LABEL, type GameState, type Point, type Stat } from "./sim/data.ts";
+  import {
+    chooseStat,
+    clearSave,
+    commandCap,
+    enemiesInView,
+    hero,
+    load,
+    minions,
+    newGame,
+    playerStep,
+    playerWait,
+    routeTo,
+    save,
+  } from "./sim/game.ts";
+  import { HUD_ROWS, cameraFor, render } from "./render.ts";
 
   const DEBUG_PX = 88;
-  const WIDE_COLS = 34;
-
+  const STEP_MS = 70;
   const BG = PALETTE[2];
-  const WALL = PALETTE[10];
-  const FLOOR = PALETTE[6];
-  const HERO = PALETTE[16];
-  const BONE = PALETTE[23];
-  const FOE = PALETTE[15];
-
-  // Astral glyphs are drawn separately so these stay one code unit per cell
-  const ROOM = [
-    "┌──────────────┐",
-    "│..............│",
-    "│....†....r....│",
-    "│..............│",
-    "│.......†...k..│",
-    "│..............│",
-    "│....†.....g...│",
-    "└──────────────┘",
-  ];
 
   let host = $state<HTMLDivElement>();
   let strip = $state<HTMLDivElement>();
-  let status = $state("booting");
-  let tapped = $state("-");
-  let fps = $state(0);
-  let stress = $state(false);
-  let scale = $state(1);
-  let dpr = $state(1);
   let cols = $state(1);
   let rows = $state(1);
+  let unspent = $state(0);
+  let over = $state("");
+  let capLine = $state("");
+  let logLine = $state("");
+  let levelNo = $state(1);
+  let roster = $state<{ name: string; hp: string }[]>([]);
+  let rosterOpen = $state(false);
+  let ready = $state(false);
 
-  const webgl2 = !!document.createElement("canvas").getContext("webgl2");
-  const glyphs = Object.keys(TILE_MAP);
+  // The game object is deliberately outside Svelte's reactivity: it holds 3600-entry
+  // arrays mutated every turn, and deep proxying that would cost more than it buys
+  let game: GameState = load() ?? newGame(Math.floor(Math.random() * 1e9));
+  let walk: Point[] = [];
+
+  function sync() {
+    unspent = game.unspent;
+    over = game.over;
+    capLine = `${minions(game).length}/${commandCap(game)}`;
+    logLine = game.log[game.log.length - 1] ?? "";
+    levelNo = game.level + 1;
+    roster = minions(game).map((u) => ({
+      name: CREATURES[u.creature].name,
+      hp: `${u.hp}/${u.maxHp}`,
+    }));
+    if (game.over) clearSave();
+    else save(game);
+  }
+
+  function act(fn: () => void) {
+    if (game.over) return;
+    fn();
+    sync();
+  }
+
+  function tapAt(sx: number, sy: number) {
+    if (game.over || unspent > 0) return;
+    if (sy >= rows - HUD_ROWS) return;
+
+    const h = hero(game);
+    if (!h) return;
+    const cam = cameraFor(game, cols, rows);
+    const wx = sx + cam.x;
+    const wy = sy + cam.y;
+
+    const dx = wx - h.x;
+    const dy = wy - h.y;
+    if (Math.abs(dx) <= 1 && Math.abs(dy) <= 1) {
+      walk = [];
+      act(() => playerStep(game, dx, dy));
+      return;
+    }
+    walk = routeTo(game, wx, wy);
+  }
+
+  function stepWalk() {
+    const next = walk[0];
+    if (!next) return;
+    const h = hero(game);
+    if (!h) {
+      walk = [];
+      return;
+    }
+    walk = walk.slice(1);
+    act(() => playerStep(game, next.x - h.x, next.y - h.y));
+    // Travel stops the moment something hostile is in view, as tap-to-move promised
+    if (enemiesInView(game) > 0 || game.unspent > 0) walk = [];
+  }
+
+  function restart() {
+    clearSave();
+    game = newGame(Math.floor(Math.random() * 1e9));
+    walk = [];
+    rosterOpen = false;
+    sync();
+  }
 
   const layout = () =>
     computeLayout({
@@ -48,59 +112,9 @@
       reserved: strip?.offsetHeight || DEBUG_PX,
     });
 
-  function drawScene(d: Display, w: number, h: number) {
-    d.clear();
-
-    SHEET.forEach((row, y) =>
-      row.forEach((ch, x) => {
-        if (x < w && y < h - 1) d.draw(x, y, ch, PALETTE[6 + ((x + y) % 18)], BG);
-      }),
-    );
-
-    // Short viewports put the rest beside the sheet rather than under it
-    const wide = w >= WIDE_COLS;
-    const ox = wide ? 17 : 0;
-    let oy = wide ? 0 : Math.min(SHEET.length, h) + 1;
-    const span = Math.max(1, w - ox);
-
-    PALETTE.forEach((c, i) => {
-      const py = oy + Math.floor(i / span);
-      if (py < h - 1) d.draw(ox + (i % span), py, "█", c, BG);
-    });
-
-    oy += Math.ceil(PALETTE.length / span) + 1;
-    ROOM.forEach((line, ry) =>
-      [...line].forEach((ch, rx) => {
-        const cx = ox + rx;
-        const cy = oy + ry;
-        if (cx >= w || cy >= h - 1) return;
-        const fg = ch === "." ? FLOOR : "rkg".includes(ch) ? FOE : ch === "†" ? BONE : WALL;
-        d.draw(cx, cy, ch, fg, BG);
-      }),
-    );
-    if (ox + 3 < w && oy + 4 < h - 1) d.draw(ox + 3, oy + 4, "🕱", HERO, BG);
-
-    d.drawText(0, h - 1, `%c{${FOE}}♥%c{${BONE}}12 %c{${PALETTE[20]}}⚉%c{${BONE}}8 †4/6`);
-  }
-
-  function drawStress(d: Display, w: number, h: number) {
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++) {
-        const ch = glyphs[(Math.random() * glyphs.length) | 0];
-        d.draw(x, y, ch, PALETTE[6 + ((Math.random() * 18) | 0)], BG);
-      }
-    }
-  }
-
   $effect(() => {
     if (!host) return;
-    if (!webgl2) {
-      status = "WebGL2 unsupported - tile-gl cannot run here";
-      return;
-    }
-
-    const missing = [...ROOM.join(""), "🕱", "█", "♥", "⚉", "†"].filter((c) => !(c in TILE_MAP));
-    if (missing.length) status = `missing glyphs: ${missing.join(" ")}`;
+    if (!document.createElement("canvas").getContext("webgl2")) return;
 
     let disposed = false;
     let cleanup = () => {};
@@ -110,12 +124,13 @@
         if (disposed || !host) return;
 
         const first = layout();
-        ({ dpr, scale, cols, rows } = first);
+        cols = first.cols;
+        rows = first.rows;
 
         const display = new Display({
           layout: "tile-gl",
-          width: first.cols,
-          height: first.rows,
+          width: cols,
+          height: rows,
           tileWidth: TILE,
           tileHeight: TILE,
           tileSet: sheet,
@@ -133,41 +148,36 @@
 
         const onTap = (e: PointerEvent) => {
           const [x, y] = display.eventToPosition(e);
-          tapped = `${x},${y}`;
+          if (x >= 0 && y >= 0) tapAt(x, y);
         };
         canvas.addEventListener("pointerdown", onTap);
-
-        const apply = (l: ReturnType<typeof layout>) => {
-          canvas.style.width = `${(l.cols * l.cell) / l.dpr}px`;
-          canvas.style.height = `${(l.rows * l.cell) / l.dpr}px`;
-          if (!stress) drawScene(display, l.cols, l.rows);
-          status = `${glyphs.length} glyphs, ${l.cols}x${l.rows} grid, ${TILE * l.scale}px tiles`;
-        };
 
         const resize = () => {
           const l = layout();
           if (l.cols !== cols || l.rows !== rows) {
             display.setOptions({ width: l.cols, height: l.rows });
+            cols = l.cols;
+            rows = l.rows;
           }
-          ({ dpr, scale, cols, rows } = l);
-          apply(l);
+          canvas.style.width = `${(l.cols * l.cell) / l.dpr}px`;
+          canvas.style.height = `${(l.rows * l.cell) / l.dpr}px`;
         };
         window.addEventListener("resize", resize);
         window.addEventListener("orientationchange", resize);
-        apply(first);
-        requestAnimationFrame(resize);
+        resize();
+        sync();
+        ready = true;
 
-        let frames = 0;
         let last = performance.now();
-        const loop = () => {
-          if (stress) drawStress(display, cols, rows);
-          frames++;
-          const now = performance.now();
-          if (now - last >= 500) {
-            fps = Math.round((frames * 1000) / (now - last));
-            frames = 0;
-            last = now;
+        let since = 0;
+        const loop = (now: number) => {
+          since += now - last;
+          last = now;
+          if (since >= STEP_MS) {
+            since = 0;
+            stepWalk();
           }
+          render(display, game, cols, rows);
           raf = requestAnimationFrame(loop);
         };
         let raf = requestAnimationFrame(loop);
@@ -180,7 +190,7 @@
           canvas.remove();
         };
       },
-      () => (status = "tileset failed to load"),
+      () => {},
     );
 
     return () => {
@@ -188,23 +198,55 @@
       cleanup();
     };
   });
-
-  function toggleStress() {
-    stress = !stress;
-  }
 </script>
 
-<main style="--bg:{PALETTE[2]}; --ink:{PALETTE[23]}; --dim:{PALETTE[9]}">
+<main style="--bg:{PALETTE[2]}; --ink:{PALETTE[23]}; --dim:{PALETTE[9]}; --gold:{PALETTE[16]}">
   <div class="stage" bind:this={host}></div>
-  <div class="debug" bind:this={strip}>
-    <button onclick={toggleStress} class:on={stress}>
-      {stress ? "stop" : "stress"}
-    </button>
-    <span>×{scale} dpr{dpr}</span>
-    <span>{fps} fps</span>
-    <span>tap {tapped}</span>
-    <span class="status">{status}</span>
+
+  <div class="bar" bind:this={strip}>
+    <button onclick={() => act(() => playerWait(game))} disabled={!ready || !!over}>wait</button>
+    <button onclick={() => (rosterOpen = !rosterOpen)} disabled={!ready}>army {capLine}</button>
+    <span class="dim log">{logLine}</span>
   </div>
+
+  {#if rosterOpen}
+    <div class="sheet">
+      <h2>Army {capLine}</h2>
+      {#if roster.length === 0}
+        <p class="dim">Nothing raised. Step onto a corpse to claim it.</p>
+      {:else}
+        <ul>
+          {#each roster as r}
+            <li><span>{r.name}</span><span class="dim">{r.hp}</span></li>
+          {/each}
+        </ul>
+      {/if}
+      <button onclick={() => (rosterOpen = false)}>close</button>
+    </div>
+  {/if}
+
+  {#if unspent > 0}
+    <div class="sheet">
+      <h2>Level {levelNo}</h2>
+      {#each Object.entries(STAT_LABEL) as [stat, label]}
+        <button class="wide" onclick={() => act(() => chooseStat(game, stat as Stat))}>
+          {label}
+        </button>
+      {/each}
+    </div>
+  {/if}
+
+  {#if over}
+    <div class="sheet">
+      <h2>{over === "dead" ? "The necromancer falls" : "You descend"}</h2>
+      <p class="dim">
+        {over === "dead"
+          ? "Your army crumbles with you."
+          : "The stair closes behind you. Floor 2 is not built yet."}
+      </p>
+      <button class="wide" onclick={restart}>new run</button>
+    </div>
+  {/if}
 </main>
 
 <style>
@@ -219,9 +261,9 @@
     align-items: flex-start;
     background: var(--bg);
     color: var(--ink);
-    font: 12px/1.4 ui-monospace, monospace;
+    font: 13px/1.4 ui-monospace, monospace;
   }
-  .debug {
+  .bar {
     position: fixed;
     left: 0;
     right: 0;
@@ -229,24 +271,68 @@
     display: flex;
     gap: 10px;
     align-items: center;
-    flex-wrap: wrap;
     justify-content: center;
+    flex-wrap: wrap;
     padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
     background: var(--bg);
   }
+  .log {
+    flex-basis: 100%;
+    text-align: center;
+    min-height: 1.4em;
+  }
   button {
     min-height: 44px;
-    min-width: 88px;
+    min-width: 96px;
     border: 1px solid var(--dim);
     background: transparent;
     color: var(--ink);
     font: inherit;
     border-radius: 4px;
   }
-  button.on {
-    border-color: var(--ink);
+  button:disabled {
+    opacity: 0.4;
   }
-  .status {
+  button.wide {
+    width: 100%;
+    text-align: left;
+    padding: 0 12px;
+  }
+  .sheet {
+    position: fixed;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: min(320px, calc(100vw - 32px));
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 16px;
+    background: var(--bg);
+    border: 1px solid var(--dim);
+    border-radius: 6px;
+  }
+  h2 {
+    margin: 0;
+    font-size: 15px;
+    color: var(--gold);
+  }
+  p {
+    margin: 0;
+  }
+  ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  li {
+    display: flex;
+    justify-content: space-between;
+  }
+  .dim {
     color: var(--dim);
   }
 </style>
