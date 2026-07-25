@@ -3,8 +3,12 @@
   import { TILE, TILE_MAP, SHEET, PALETTE } from "./tilemap";
   import { loadTileset } from "./tileset";
 
-  const W = 24;
-  const H = 28;
+  const TARGET_TILE_CSS = 16;
+  const MIN_COLS = 16;
+  const MIN_ROWS = 20;
+  const MAX_COLS = 48;
+  const MAX_ROWS = 64;
+  const DEBUG_PX = 88;
 
   const BG = PALETTE[2];
   const WALL = PALETTE[10];
@@ -24,8 +28,6 @@
     "│....†.....g...│",
     "└──────────────┘",
   ];
-  const ROOM_X = 4;
-  const ROOM_Y = 18;
 
   let host = $state<HTMLDivElement>();
   let status = $state("booting");
@@ -34,55 +36,63 @@
   let stress = $state(false);
   let scale = $state(1);
   let dpr = $state(1);
-
-  const HUD_PX = 96;
+  let cols = $state(MIN_COLS);
+  let rows = $state(MIN_ROWS);
 
   const webgl2 = !!document.createElement("canvas").getContext("webgl2");
   const glyphs = Object.keys(TILE_MAP);
+  const clamp = (n: number, lo: number, hi: number) => Math.min(Math.max(n, lo), hi);
 
-  function drawScene(d: Display) {
-    d.clear();
-
-    // whole 256-glyph sheet, tinted to prove shader colorization
-    SHEET.forEach((row, y) =>
-      row.forEach((ch, x) => d.draw(x, y, ch, PALETTE[6 + ((x + y) % 18)], BG)),
-    );
-
-    // the 24 palette colors
-    PALETTE.forEach((c, i) => d.draw(16 + (i % 8), Math.floor(i / 8), "█", c, BG));
-
-    ROOM.forEach((line, y) =>
-      [...line].forEach((ch, x) => {
-        const fg = ch === "." ? FLOOR : "rkg".includes(ch) ? FOE : ch === "†" ? BONE : WALL;
-        d.draw(ROOM_X + x, ROOM_Y + y, ch, fg, BG);
-      }),
-    );
-    d.draw(ROOM_X + 3, ROOM_Y + 4, "🕱", HERO, BG);
-
-    d.drawText(0, H - 1, `%c{${FOE}}♥%c{${BONE}}12 %c{${PALETTE[20]}}⚉%c{${BONE}}8 †4/6`);
+  // Scale is picked for legibility in device pixels, then the grid fills what is left
+  function layout() {
+    const d = window.devicePixelRatio || 1;
+    const s = Math.max(1, Math.round((TARGET_TILE_CSS * d) / TILE));
+    const cell = TILE * s;
+    return {
+      dpr: d,
+      scale: s,
+      cell,
+      cols: clamp(Math.floor((window.innerWidth * d) / cell), MIN_COLS, MAX_COLS),
+      rows: clamp(Math.floor(((window.innerHeight - DEBUG_PX) * d) / cell), MIN_ROWS, MAX_ROWS),
+    };
   }
 
-  function drawStress(d: Display) {
-    for (let y = 0; y < H; y++) {
-      for (let x = 0; x < W; x++) {
+  function drawScene(d: Display, w: number, h: number) {
+    d.clear();
+
+    SHEET.forEach((row, y) =>
+      row.forEach((ch, x) => {
+        if (x < w && y < h) d.draw(x, y, ch, PALETTE[6 + ((x + y) % 18)], BG);
+      }),
+    );
+
+    let y = Math.min(SHEET.length, h) + 1;
+    PALETTE.forEach((c, i) => {
+      const py = y + Math.floor(i / w);
+      if (py < h) d.draw(i % w, py, "█", c, BG);
+    });
+
+    y += Math.ceil(PALETTE.length / w) + 1;
+    ROOM.forEach((line, ry) =>
+      [...line].forEach((ch, rx) => {
+        const cy = y + ry;
+        if (rx >= w || cy >= h - 1) return;
+        const fg = ch === "." ? FLOOR : "rkg".includes(ch) ? FOE : ch === "†" ? BONE : WALL;
+        d.draw(rx, cy, ch, fg, BG);
+      }),
+    );
+    if (y + 4 < h - 1) d.draw(3, y + 4, "🕱", HERO, BG);
+
+    d.drawText(0, h - 1, `%c{${FOE}}♥%c{${BONE}}12 %c{${PALETTE[20]}}⚉%c{${BONE}}8 †4/6`);
+  }
+
+  function drawStress(d: Display, w: number, h: number) {
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
         const ch = glyphs[(Math.random() * glyphs.length) | 0];
         d.draw(x, y, ch, PALETTE[6 + ((Math.random() * 18) | 0)], BG);
       }
     }
-  }
-
-  // Integer scale is chosen in device pixels, so a 3x phone gets 3x the budget
-  function fit(canvas: HTMLCanvasElement) {
-    dpr = window.devicePixelRatio || 1;
-    scale = Math.max(
-      1,
-      Math.min(
-        Math.floor((window.innerWidth * dpr) / (W * TILE)),
-        Math.floor(((window.innerHeight - HUD_PX) * dpr) / (H * TILE)),
-      ),
-    );
-    canvas.style.width = `${(W * TILE * scale) / dpr}px`;
-    canvas.style.height = `${(H * TILE * scale) / dpr}px`;
   }
 
   $effect(() => {
@@ -102,10 +112,13 @@
       (sheet) => {
         if (disposed || !host) return;
 
+        const first = layout();
+        ({ dpr, scale, cols, rows } = first);
+
         const display = new Display({
           layout: "tile-gl",
-          width: W,
-          height: H,
+          width: first.cols,
+          height: first.rows,
           tileWidth: TILE,
           tileHeight: TILE,
           tileSet: sheet,
@@ -117,6 +130,7 @@
         const canvas = display.getContainer() as HTMLCanvasElement;
         canvas.style.imageRendering = "pixelated";
         canvas.style.touchAction = "manipulation";
+        canvas.style.display = "block";
         document.body.style.background = BG;
         host.appendChild(canvas);
 
@@ -126,17 +140,28 @@
         };
         canvas.addEventListener("pointerdown", onTap);
 
-        const resize = () => fit(canvas);
-        resize();
-        window.addEventListener("resize", resize);
+        const apply = (l: ReturnType<typeof layout>) => {
+          canvas.style.width = `${(l.cols * l.cell) / l.dpr}px`;
+          canvas.style.height = `${(l.rows * l.cell) / l.dpr}px`;
+          if (!stress) drawScene(display, l.cols, l.rows);
+          status = `${glyphs.length} glyphs, ${l.cols}x${l.rows} grid, ${TILE * l.scale}px tiles`;
+        };
 
-        drawScene(display);
-        status = `${glyphs.length} glyphs, ${PALETTE.length} colors, ${W}x${H} @ ${TILE}px`;
+        const resize = () => {
+          const l = layout();
+          if (l.cols !== cols || l.rows !== rows) {
+            display.setOptions({ width: l.cols, height: l.rows });
+          }
+          ({ dpr, scale, cols, rows } = l);
+          apply(l);
+        };
+        window.addEventListener("resize", resize);
+        apply(first);
 
         let frames = 0;
         let last = performance.now();
         const loop = () => {
-          if (stress) drawStress(display);
+          if (stress) drawStress(display, cols, rows);
           frames++;
           const now = performance.now();
           if (now - last >= 500) {
@@ -171,15 +196,15 @@
 
 <main style="--bg:{PALETTE[2]}; --ink:{PALETTE[23]}; --dim:{PALETTE[9]}">
   <div class="stage" bind:this={host}></div>
-  <div class="hud">
+  <div class="debug">
     <button onclick={toggleStress} class:on={stress}>
-      {stress ? "stop stress" : "stress test"}
+      {stress ? "stop" : "stress"}
     </button>
     <span>×{scale} dpr{dpr}</span>
     <span>{fps} fps</span>
     <span>tap {tapped}</span>
+    <span class="status">{status}</span>
   </div>
-  <p class="status">{status}</p>
 </main>
 
 <style>
@@ -190,29 +215,28 @@
   main {
     min-height: 100dvh;
     display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 8px;
-    padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+    justify-content: center;
+    align-items: flex-start;
     background: var(--bg);
     color: var(--ink);
-    font: 13px/1.4 ui-monospace, monospace;
+    font: 12px/1.4 ui-monospace, monospace;
   }
-  .stage {
+  .debug {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
     display: flex;
-    justify-content: center;
-    padding-top: 8px;
-  }
-  .hud {
-    display: flex;
-    gap: 12px;
+    gap: 10px;
     align-items: center;
     flex-wrap: wrap;
     justify-content: center;
+    padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
+    background: color-mix(in srgb, var(--bg) 80%, transparent);
   }
   button {
     min-height: 44px;
-    min-width: 120px;
+    min-width: 88px;
     border: 1px solid var(--dim);
     background: transparent;
     color: var(--ink);
@@ -223,7 +247,8 @@
     border-color: var(--ink);
   }
   .status {
-    margin: 0;
     color: var(--dim);
+    flex-basis: 100%;
+    text-align: center;
   }
 </style>
